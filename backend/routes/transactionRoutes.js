@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const authMiddleware = require("../middlewares/authMiddleware");
+const { validateIdParam } = require("../middlewares/validate");
 const {
   createTransaction,
   getTransactions,
@@ -13,8 +14,8 @@ router.use(authMiddleware);
 
 router.post("/", createTransaction);
 router.get("/", getTransactions);
-router.get("/:id", getTransactionById);
-router.put("/:id", updateTransaction);
-router.delete("/:id", deleteTransaction);
+router.get("/:id", validateIdParam, getTransactionById);
+router.put("/:id", validateIdParam, updateTransaction);
+router.delete("/:id", validateIdParam, deleteTransaction);
 
 module.exports = router;
