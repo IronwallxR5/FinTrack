@@ -28,14 +28,19 @@ export function AuthProvider({ children }) {
     return res.data;
   };
 
-  const register = async (email, password) => {
-    const res = await api.post("/auth/register", { email, password });
+  const register = async (email, password, name) => {
+    const res = await api.post("/auth/register", { email, password, name: name || undefined });
     const { token: t, user: u } = res.data.data;
     localStorage.setItem("token", t);
     localStorage.setItem("user", JSON.stringify(u));
     setToken(t);
     setUser(u);
     return res.data;
+  };
+
+  const updateUser = (updatedUser) => {
+    localStorage.setItem("user", JSON.stringify(updatedUser));
+    setUser(updatedUser);
   };
 
   const logout = () => {
@@ -46,7 +51,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, register, logout, loading }}>
+    <AuthContext.Provider value={{ user, token, login, register, updateUser, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

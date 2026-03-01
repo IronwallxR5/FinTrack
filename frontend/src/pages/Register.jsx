@@ -10,6 +10,7 @@ import { Wallet } from "lucide-react";
 export default function Register() {
   const { register } = useAuth();
   const navigate = useNavigate();
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -27,7 +28,7 @@ export default function Register() {
 
     setLoading(true);
     try {
-      await register(email, password);
+      await register(email, password, name);
       navigate("/dashboard");
     } catch (err) {
       setError(err.response?.data?.message || "Registration failed");
@@ -53,6 +54,17 @@ export default function Register() {
                 {error}
               </div>
             )}
+            <div className="space-y-2">
+              <Label htmlFor="name">Full Name</Label>
+              <Input
+                id="name"
+                type="text"
+                placeholder="John Doe"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={100}
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input

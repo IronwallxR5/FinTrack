@@ -10,6 +10,7 @@ import {
   Menu,
   X,
   Wallet,
+  UserCircle,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -18,6 +19,7 @@ const navItems = [
   { to: "/transactions", label: "Transactions", icon: ArrowLeftRight },
   { to: "/categories", label: "Categories", icon: Tags },
   { to: "/budgets", label: "Budgets", icon: PiggyBank },
+  { to: "/profile", label: "Profile", icon: UserCircle },
 ];
 
 export default function Layout() {
@@ -85,7 +87,8 @@ export default function Layout() {
             <div className="border-t p-4">
               <div className="flex items-center justify-between">
                 <div className="truncate">
-                  <p className="text-sm font-medium truncate">{user?.email}</p>
+                  <p className="text-sm font-medium truncate">{user?.name || user?.email}</p>
+                  {user?.name && <p className="text-xs text-muted-foreground truncate">{user?.email}</p>}
                 </div>
                 <Button variant="ghost" size="icon" onClick={handleLogout}>
                   <LogOut className="h-4 w-4" />
