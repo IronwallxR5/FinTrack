@@ -1,4 +1,5 @@
 const pool = require("../config/db");
+const { isValidUUID } = require("../middlewares/validate");
 
 const createBudget = async (req, res, next) => {
   try {
@@ -12,10 +13,24 @@ const createBudget = async (req, res, next) => {
       });
     }
 
-    if (Number(monthly_limit) <= 0) {
+    if (!isValidUUID(category_id)) {
       return res.status(400).json({
         success: false,
-        message: "monthly_limit must be greater than 0.",
+        message: "category_id must be a valid UUID.",
+      });
+    }
+
+    if (isNaN(Number(monthly_limit)) || Number(monthly_limit) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "monthly_limit must be a positive number.",
+      });
+    }
+
+    if (Number(monthly_limit) > 9999999999.99) {
+      return res.status(400).json({
+        success: false,
+        message: "monthly_limit exceeds the maximum allowed value.",
       });
     }
 
@@ -196,10 +211,17 @@ const updateBudget = async (req, res, next) => {
     const { id } = req.params;
     const { monthly_limit } = req.body;
 
-    if (!monthly_limit || Number(monthly_limit) <= 0) {
+    if (!monthly_limit || isNaN(Number(monthly_limit)) || Number(monthly_limit) <= 0) {
       return res.status(400).json({
         success: false,
-        message: "monthly_limit is required and must be greater than 0.",
+        message: "monthly_limit is required and must be a positive number.",
+      });
+    }
+
+    if (Number(monthly_limit) > 9999999999.99) {
+      return res.status(400).json({
+        success: false,
+        message: "monthly_limit exceeds the maximum allowed value.",
       });
     }
 

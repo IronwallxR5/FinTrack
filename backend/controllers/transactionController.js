@@ -1,4 +1,5 @@
 const pool = require("../config/db");
+const { isValidUUID, isValidDate } = require("../middlewares/validate");
 
 const normaliseAmount = (amount) => {
   return parseFloat(Number(amount).toFixed(2));
@@ -25,7 +26,35 @@ const createTransaction = async (req, res, next) => {
       });
     }
 
+    if (Math.abs(amount) > 9999999999.99) {
+      return res.status(400).json({
+        success: false,
+        message: "Amount exceeds the maximum allowed value.",
+      });
+    }
+
+    if (description && (typeof description !== "string" || description.length > 500)) {
+      return res.status(400).json({
+        success: false,
+        message: "Description must not exceed 500 characters.",
+      });
+    }
+
+    if (date && !isValidDate(date)) {
+      return res.status(400).json({
+        success: false,
+        message: "Date must be in YYYY-MM-DD format.",
+      });
+    }
+
     if (category_id) {
+      if (!isValidUUID(category_id)) {
+        return res.status(400).json({
+          success: false,
+          message: "category_id must be a valid UUID.",
+        });
+      }
+
       const cat = await pool.query(
         "SELECT id, type FROM categories WHERE id = $1 AND user_id = $2",
         [category_id, userId]
@@ -65,7 +94,24 @@ const createTransaction = async (req, res, next) => {
 const getTransactions = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { category_id, type, from, to } = req.query;
+    const { category_id, type, from, to, page = 1, limit = 50 } = req.query;
+
+    if (category_id && !isValidUUID(category_id)) {
+      return res.status(400).json({ success: false, message: "category_id must be a valid UUID." });
+    }
+    if (type && !["income", "expense"].includes(type)) {
+      return res.status(400).json({ success: false, message: "type must be 'income' or 'expense'." });
+    }
+    if (from && !isValidDate(from)) {
+      return res.status(400).json({ success: false, message: "from must be in YYYY-MM-DD format." });
+    }
+    if (to && !isValidDate(to)) {
+      return res.status(400).json({ success: false, message: "to must be in YYYY-MM-DD format." });
+    }
+
+    const safePage = Math.max(1, parseInt(page, 10) || 1);
+    const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
+    const offset = (safePage - 1) * safeLimit;
 
     let query = `
       SELECT t.*, c.name AS category_name, c.type AS category_type
@@ -96,13 +142,16 @@ const getTransactions = async (req, res, next) => {
       params.push(to);
     }
 
-    query += " ORDER BY t.date DESC, t.created_at DESC";
+    query += ` ORDER BY t.date DESC, t.created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
+    params.push(safeLimit, offset);
 
     const result = await pool.query(query, params);
 
     return res.status(200).json({
       success: true,
       count: result.rows.length,
+      page: safePage,
+      limit: safeLimit,
       data: result.rows,
     });
   } catch (err) {
@@ -163,6 +212,9 @@ const updateTransaction = async (req, res, next) => {
 
     if (category_id !== undefined) {
       if (category_id !== null) {
+        if (!isValidUUID(category_id)) {
+          return res.status(400).json({ success: false, message: "category_id must be a valid UUID." });
+        }
         const cat = await pool.query(
           "SELECT id FROM categories WHERE id = $1 AND user_id = $2",
           [category_id, userId]
@@ -186,16 +238,25 @@ const updateTransaction = async (req, res, next) => {
           message: "Amount must be a valid number.",
         });
       }
+      if (Math.abs(amount) > 9999999999.99) {
+        return res.status(400).json({ success: false, message: "Amount exceeds the maximum allowed value." });
+      }
       fields.push(`amount = $${idx++}`);
       params.push(amount);
     }
 
     if (description !== undefined) {
+      if (typeof description === "string" && description.length > 500) {
+        return res.status(400).json({ success: false, message: "Description must not exceed 500 characters." });
+      }
       fields.push(`description = $${idx++}`);
       params.push(description);
     }
 
     if (date !== undefined) {
+      if (!isValidDate(date)) {
+        return res.status(400).json({ success: false, message: "Date must be in YYYY-MM-DD format." });
+      }
       fields.push(`date = $${idx++}`);
       params.push(date);
     }

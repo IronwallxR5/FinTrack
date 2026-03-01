@@ -1,9 +1,19 @@
 const pool = require("../config/db");
 
+const isValidYear = (v) => /^\d{4}$/.test(v) && Number(v) >= 1900 && Number(v) <= 2100;
+const isValidMonth = (v) => /^\d{1,2}$/.test(v) && Number(v) >= 1 && Number(v) <= 12;
+
 const getSummary = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const { year, month } = req.query;
+
+    if (year && !isValidYear(year)) {
+      return res.status(400).json({ success: false, message: "year must be a 4-digit number (1900-2100)." });
+    }
+    if (month && !isValidMonth(month)) {
+      return res.status(400).json({ success: false, message: "month must be 1-12." });
+    }
 
     let dateFilter = "";
     const params = [userId];
@@ -88,6 +98,13 @@ const getCategoryBreakdown = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const { year, month, type } = req.query;
+
+    if (year && !isValidYear(year)) {
+      return res.status(400).json({ success: false, message: "year must be a 4-digit number (1900-2100)." });
+    }
+    if (month && !isValidMonth(month)) {
+      return res.status(400).json({ success: false, message: "month must be 1-12." });
+    }
 
     let dateFilter = "";
     let typeFilter = "";

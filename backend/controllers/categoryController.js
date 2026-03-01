@@ -12,6 +12,13 @@ const createCategory = async (req, res, next) => {
       });
     }
 
+    if (typeof name !== "string" || name.trim().length === 0 || name.trim().length > 100) {
+      return res.status(400).json({
+        success: false,
+        message: "Name must be between 1 and 100 characters.",
+      });
+    }
+
     if (!["income", "expense"].includes(type)) {
       return res.status(400).json({
         success: false,
@@ -104,6 +111,13 @@ const updateCategory = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: "Provide at least name or type to update.",
+      });
+    }
+
+    if (name !== undefined && (typeof name !== "string" || name.trim().length === 0 || name.trim().length > 100)) {
+      return res.status(400).json({
+        success: false,
+        message: "Name must be between 1 and 100 characters.",
       });
     }
 
