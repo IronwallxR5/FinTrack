@@ -1,6 +1,6 @@
 const errorHandler = (err, _req, res, _next) => {
   console.error(`[ERROR] ${err.message}`);
-]
+
   if (err.type === "entity.parse.failed") {
     return res.status(400).json({ success: false, message: "Malformed JSON in request body." });
   }

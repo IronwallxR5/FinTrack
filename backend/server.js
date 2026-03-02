@@ -1,8 +1,10 @@
 const express = require("express");
 const cors = require("cors");
+const session = require("express-session");
 require("dotenv").config();
 
 const runMigrations = require("./config/migrate");
+const passport = require("./config/passport");
 const authRoutes = require("./routes/authRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
 const transactionRoutes = require("./routes/transactionRoutes");
@@ -14,6 +16,17 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+app.use(
+  session({
+    secret: process.env.JWT_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: { secure: false, maxAge: 5 * 60 * 1000 },
+  })
+);
+app.use(passport.initialize());
+app.use(passport.session());
 
 app.get("/", (_req, res) => {
   res.json({ success: true, message: "Personal Finance Tracker API is running 🚀" });
