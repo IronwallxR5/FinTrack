@@ -1,10 +1,11 @@
 const pool = require("../config/db");
 const { isValidUUID } = require("../middlewares/validate");
+const { SUPPORTED_CURRENCIES } = require("../config/currencies");
 
 const createBudget = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { category_id, monthly_limit } = req.body;
+    const { category_id, monthly_limit, currency } = req.body;
 
     if (!category_id || monthly_limit === undefined) {
       return res.status(400).json({
@@ -53,11 +54,26 @@ const createBudget = async (req, res, next) => {
       });
     }
 
+    let budgetCurrency = currency;
+    if (!budgetCurrency) {
+      const userRow = await pool.query(
+        "SELECT preferred_currency FROM users WHERE id = $1",
+        [userId]
+      );
+      budgetCurrency = userRow.rows[0]?.preferred_currency || "INR";
+    }
+    if (!SUPPORTED_CURRENCIES.includes(budgetCurrency)) {
+      return res.status(400).json({
+        success: false,
+        message: `Currency must be one of: ${SUPPORTED_CURRENCIES.join(", ")}.`,
+      });
+    }
+
     const result = await pool.query(
-      `INSERT INTO budgets (user_id, category_id, monthly_limit)
-       VALUES ($1, $2, $3)
+      `INSERT INTO budgets (user_id, category_id, monthly_limit, currency)
+       VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [userId, category_id, monthly_limit]
+      [userId, category_id, monthly_limit, budgetCurrency]
     );
 
     return res.status(201).json({
@@ -86,20 +102,24 @@ const getBudgets = async (req, res, next) => {
          b.category_id,
          c.name         AS category_name,
          b.monthly_limit,
+         b.currency,
          COALESCE(SUM(
            CASE WHEN EXTRACT(YEAR  FROM t.date) = EXTRACT(YEAR  FROM CURRENT_DATE)
                  AND EXTRACT(MONTH FROM t.date) = EXTRACT(MONTH FROM CURRENT_DATE)
+                 AND t.currency = b.currency
                 THEN ABS(t.amount) ELSE 0 END
          ), 0)          AS spent_this_month,
          b.monthly_limit - COALESCE(SUM(
            CASE WHEN EXTRACT(YEAR  FROM t.date) = EXTRACT(YEAR  FROM CURRENT_DATE)
                  AND EXTRACT(MONTH FROM t.date) = EXTRACT(MONTH FROM CURRENT_DATE)
+                 AND t.currency = b.currency
                 THEN ABS(t.amount) ELSE 0 END
          ), 0)          AS remaining,
          ROUND(
            COALESCE(SUM(
              CASE WHEN EXTRACT(YEAR  FROM t.date) = EXTRACT(YEAR  FROM CURRENT_DATE)
                    AND EXTRACT(MONTH FROM t.date) = EXTRACT(MONTH FROM CURRENT_DATE)
+                   AND t.currency = b.currency
                   THEN ABS(t.amount) ELSE 0 END
            ), 0) / b.monthly_limit * 100, 2
          )              AS percentage_used
@@ -107,7 +127,7 @@ const getBudgets = async (req, res, next) => {
        JOIN categories c ON b.category_id = c.id
        LEFT JOIN transactions t ON t.category_id = b.category_id AND t.user_id = b.user_id
        WHERE b.user_id = $1
-       GROUP BY b.id, b.category_id, c.name, b.monthly_limit
+       GROUP BY b.id, b.category_id, c.name, b.monthly_limit, b.currency
        ORDER BY percentage_used DESC`,
       [userId]
     );
@@ -117,6 +137,7 @@ const getBudgets = async (req, res, next) => {
       category_id: r.category_id,
       category_name: r.category_name,
       monthly_limit: parseFloat(r.monthly_limit),
+      currency: r.currency,
       spent_this_month: parseFloat(r.spent_this_month),
       remaining: parseFloat(r.remaining),
       percentage_used: parseFloat(r.percentage_used),
@@ -148,20 +169,24 @@ const getBudgetById = async (req, res, next) => {
          b.category_id,
          c.name         AS category_name,
          b.monthly_limit,
+         b.currency,
          COALESCE(SUM(
            CASE WHEN EXTRACT(YEAR  FROM t.date) = EXTRACT(YEAR  FROM CURRENT_DATE)
                  AND EXTRACT(MONTH FROM t.date) = EXTRACT(MONTH FROM CURRENT_DATE)
+                 AND t.currency = b.currency
                 THEN ABS(t.amount) ELSE 0 END
          ), 0)          AS spent_this_month,
          b.monthly_limit - COALESCE(SUM(
            CASE WHEN EXTRACT(YEAR  FROM t.date) = EXTRACT(YEAR  FROM CURRENT_DATE)
                  AND EXTRACT(MONTH FROM t.date) = EXTRACT(MONTH FROM CURRENT_DATE)
+                 AND t.currency = b.currency
                 THEN ABS(t.amount) ELSE 0 END
          ), 0)          AS remaining,
          ROUND(
            COALESCE(SUM(
              CASE WHEN EXTRACT(YEAR  FROM t.date) = EXTRACT(YEAR  FROM CURRENT_DATE)
                    AND EXTRACT(MONTH FROM t.date) = EXTRACT(MONTH FROM CURRENT_DATE)
+                   AND t.currency = b.currency
                   THEN ABS(t.amount) ELSE 0 END
            ), 0) / b.monthly_limit * 100, 2
          )              AS percentage_used
@@ -169,7 +194,7 @@ const getBudgetById = async (req, res, next) => {
        JOIN categories c ON b.category_id = c.id
        LEFT JOIN transactions t ON t.category_id = b.category_id AND t.user_id = b.user_id
        WHERE b.id = $1 AND b.user_id = $2
-       GROUP BY b.id, b.category_id, c.name, b.monthly_limit`,
+       GROUP BY b.id, b.category_id, c.name, b.monthly_limit, b.currency`,
       [id, userId]
     );
 
@@ -189,6 +214,7 @@ const getBudgetById = async (req, res, next) => {
         category_id: r.category_id,
         category_name: r.category_name,
         monthly_limit: parseFloat(r.monthly_limit),
+        currency: r.currency,
         spent_this_month: parseFloat(r.spent_this_month),
         remaining: parseFloat(r.remaining),
         percentage_used: parseFloat(r.percentage_used),

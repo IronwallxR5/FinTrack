@@ -61,7 +61,7 @@ const register = async (req, res, next) => {
     const result = await pool.query(
       `INSERT INTO users (email, password_hash, name)
        VALUES ($1, $2, $3)
-       RETURNING id, email, name, created_at`,
+       RETURNING id, email, name, preferred_currency, created_at`,
       [email.toLowerCase().trim(), passwordHash, name || null]
     );
 
@@ -79,6 +79,7 @@ const register = async (req, res, next) => {
           id: user.id,
           email: user.email,
           name: user.name,
+          preferred_currency: user.preferred_currency,
           created_at: user.created_at,
         },
         token,
@@ -108,7 +109,7 @@ const login = async (req, res, next) => {
     }
 
     const result = await pool.query(
-      "SELECT id, email, name, password_hash, created_at FROM users WHERE email = $1",
+      "SELECT id, email, name, preferred_currency, password_hash, created_at FROM users WHERE email = $1",
       [email.toLowerCase().trim()]
     );
 
@@ -142,6 +143,7 @@ const login = async (req, res, next) => {
           id: user.id,
           email: user.email,
           name: user.name,
+          preferred_currency: user.preferred_currency,
           created_at: user.created_at,
         },
         token,
@@ -158,7 +160,7 @@ const getProfile = async (req, res, next) => {
     const userId = req.user.id;
 
     const result = await pool.query(
-      "SELECT id, email, name, created_at FROM users WHERE id = $1",
+      "SELECT id, email, name, preferred_currency, created_at FROM users WHERE id = $1",
       [userId]
     );
 
@@ -178,12 +180,12 @@ const getProfile = async (req, res, next) => {
 const updateProfile = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { name, password } = req.body;
+    const { name, password, preferred_currency } = req.body;
 
-    if (!name && !password) {
+    if (!name && !password && !preferred_currency) {
       return res.status(400).json({
         success: false,
-        message: "Provide at least name or password to update.",
+        message: "Provide at least name, password, or preferred_currency to update.",
       });
     }
 
@@ -211,10 +213,20 @@ const updateProfile = async (req, res, next) => {
       params.push(hash);
     }
 
+    if (preferred_currency) {
+      const { SUPPORTED_CURRENCIES } = require("../config/currencies");
+      const code = preferred_currency.toUpperCase();
+      if (!SUPPORTED_CURRENCIES.includes(code)) {
+        return res.status(400).json({ success: false, message: `Unsupported currency. Supported: ${SUPPORTED_CURRENCIES.join(", ")}.` });
+      }
+      fields.push(`preferred_currency = $${idx++}`);
+      params.push(code);
+    }
+
     params.push(userId);
 
     const result = await pool.query(
-      `UPDATE users SET ${fields.join(", ")} WHERE id = $${idx} RETURNING id, email, name, created_at`,
+      `UPDATE users SET ${fields.join(", ")} WHERE id = $${idx} RETURNING id, email, name, preferred_currency, created_at`,
       params
     );
 

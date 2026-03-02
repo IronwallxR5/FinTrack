@@ -1,5 +1,6 @@
 const pool = require("../config/db");
 const { isValidUUID, isValidDate } = require("../middlewares/validate");
+const { SUPPORTED_CURRENCIES } = require("../config/currencies");
 
 const normaliseAmount = (amount) => {
   return parseFloat(Number(amount).toFixed(2));
@@ -8,7 +9,22 @@ const normaliseAmount = (amount) => {
 const createTransaction = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    let { category_id, amount, description, date } = req.body;
+    let { category_id, amount, description, date, currency } = req.body;
+
+    if (!currency) {
+      const userRow = await pool.query(
+        "SELECT preferred_currency FROM users WHERE id = $1",
+        [userId]
+      );
+      currency = userRow.rows[0]?.preferred_currency || "INR";
+    }
+    currency = currency.toUpperCase();
+    if (!SUPPORTED_CURRENCIES.includes(currency)) {
+      return res.status(400).json({
+        success: false,
+        message: `Unsupported currency. Supported: ${SUPPORTED_CURRENCIES.join(", ")}.`,
+      });
+    }
 
     if (amount === undefined || amount === null) {
       return res.status(400).json({
@@ -69,8 +85,8 @@ const createTransaction = async (req, res, next) => {
     }
 
     const result = await pool.query(
-      `INSERT INTO transactions (user_id, category_id, amount, description, date)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO transactions (user_id, category_id, amount, description, date, currency)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
       [
         userId,
@@ -78,6 +94,7 @@ const createTransaction = async (req, res, next) => {
         amount,
         description || null,
         date || new Date(),
+        currency,
       ]
     );
 
@@ -94,8 +111,11 @@ const createTransaction = async (req, res, next) => {
 const getTransactions = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { category_id, type, from, to, page = 1, limit = 50 } = req.query;
+    const { category_id, type, from, to, currency, page = 1, limit = 50 } = req.query;
 
+    if (currency && !SUPPORTED_CURRENCIES.includes(currency.toUpperCase())) {
+      return res.status(400).json({ success: false, message: `Unsupported currency. Supported: ${SUPPORTED_CURRENCIES.join(", ")}.` });
+    }
     if (category_id && !isValidUUID(category_id)) {
       return res.status(400).json({ success: false, message: "category_id must be a valid UUID." });
     }
@@ -140,6 +160,11 @@ const getTransactions = async (req, res, next) => {
     if (to) {
       query += ` AND t.date <= $${idx++}`;
       params.push(to);
+    }
+
+    if (currency) {
+      query += ` AND t.currency = $${idx++}`;
+      params.push(currency.toUpperCase());
     }
 
     query += ` ORDER BY t.date DESC, t.created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
@@ -243,6 +268,15 @@ const updateTransaction = async (req, res, next) => {
       }
       fields.push(`amount = $${idx++}`);
       params.push(amount);
+    }
+
+    if (req.body.currency !== undefined) {
+      const newCurrency = (req.body.currency || "").toUpperCase();
+      if (!SUPPORTED_CURRENCIES.includes(newCurrency)) {
+        return res.status(400).json({ success: false, message: `Unsupported currency. Supported: ${SUPPORTED_CURRENCIES.join(", ")}.` });
+      }
+      fields.push(`currency = $${idx++}`);
+      params.push(newCurrency);
     }
 
     if (description !== undefined) {
