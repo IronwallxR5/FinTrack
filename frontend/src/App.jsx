@@ -8,6 +8,7 @@ import Transactions from "@/pages/Transactions";
 import Categories from "@/pages/Categories";
 import Budgets from "@/pages/Budgets";
 import Profile from "@/pages/Profile";
+import OAuthCallback from "@/pages/OAuthCallback";
 
 function ProtectedRoute({ children }) {
   const { token } = useAuth();
@@ -28,6 +29,8 @@ export default function App() {
         {/* Public routes */}
         <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
         <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
+        {/* OAuth callback — must be public (user isn't logged in yet when they land here) */}
+        <Route path="/oauth/callback" element={<OAuthCallback />} />
 
         {/* Protected routes */}
         <Route

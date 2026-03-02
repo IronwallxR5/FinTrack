@@ -43,6 +43,23 @@ export function AuthProvider({ children }) {
     setUser(updatedUser);
   };
 
+  // Called by OAuthCallback after Google sign-in redirects back with a token.
+  // Persists the token then fetches the user profile from the API.
+  const loginWithToken = async (token) => {
+    localStorage.setItem("token", token);
+    setToken(token);
+    try {
+      const res = await api.get("/auth/profile");
+      const u = res.data.data;
+      localStorage.setItem("user", JSON.stringify(u));
+      setUser(u);
+    } catch (err) {
+      localStorage.removeItem("token");
+      setToken(null);
+      throw err;
+    }
+  };
+
   const logout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
@@ -51,7 +68,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, register, updateUser, logout, loading }}>
+    <AuthContext.Provider value={{ user, token, login, register, updateUser, loginWithToken, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );
