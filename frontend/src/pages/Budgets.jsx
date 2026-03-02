@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { useAuth } from "@/context/AuthContext";
 import api from "@/lib/api";
+import { CURRENCIES, formatAmount } from "@/lib/currencies";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,12 +11,13 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Pencil, Trash2, X } from "lucide-react";
 
 export default function Budgets() {
+  const { user } = useAuth();
   const [budgets, setBudgets] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState({ category_id: "", monthly_limit: "" });
+  const [form, setForm] = useState({ category_id: "", monthly_limit: "", currency: user?.preferred_currency || "INR" });
 
   const fetchData = async () => {
     try {
@@ -36,7 +39,7 @@ export default function Budgets() {
   }, []);
 
   const resetForm = () => {
-    setForm({ category_id: "", monthly_limit: "" });
+    setForm({ category_id: "", monthly_limit: "", currency: user?.preferred_currency || "INR" });
     setEditingId(null);
     setShowForm(false);
   };
@@ -50,6 +53,7 @@ export default function Budgets() {
         await api.post("/budgets", {
           category_id: form.category_id,
           monthly_limit: parseFloat(form.monthly_limit),
+          currency: form.currency,
         });
       }
       resetForm();
@@ -60,7 +64,7 @@ export default function Budgets() {
   };
 
   const handleEdit = (b) => {
-    setForm({ category_id: b.category_id, monthly_limit: b.monthly_limit });
+    setForm({ category_id: b.category_id, monthly_limit: b.monthly_limit, currency: b.currency });
     setEditingId(b.id);
     setShowForm(true);
   };
@@ -125,16 +129,31 @@ export default function Budgets() {
                 </div>
               )}
               <div className="space-y-2">
-                <Label>Monthly Limit (₹)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  placeholder="e.g. 5000"
-                  value={form.monthly_limit}
-                  onChange={(e) => setForm({ ...form, monthly_limit: e.target.value })}
-                  required
-                />
+                <Label>Monthly Limit</Label>
+                <div className="flex gap-2">
+                  {!editingId && (
+                    <Select
+                      value={form.currency}
+                      onChange={(e) => setForm({ ...form, currency: e.target.value })}
+                      className="w-28"
+                    >
+                      {CURRENCIES.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.code}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    placeholder="e.g. 5000"
+                    value={form.monthly_limit}
+                    onChange={(e) => setForm({ ...form, monthly_limit: e.target.value })}
+                    required
+                  />
+                </div>
               </div>
               <div className={editingId ? "" : "sm:col-span-2"}>
                 <Button type="submit" className="w-full sm:w-auto">
@@ -182,8 +201,8 @@ export default function Budgets() {
                 </div>
 
                 <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>Spent: ₹{b.spent_this_month.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-                  <span>Limit: ₹{b.monthly_limit.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                  <span>Spent: {formatAmount(b.spent_this_month, b.currency)}</span>
+                  <span>Limit: {formatAmount(b.monthly_limit, b.currency)}</span>
                 </div>
 
                 <div className="h-3 rounded-full bg-muted overflow-hidden">
@@ -203,8 +222,8 @@ export default function Budgets() {
                   <span className="font-medium">{b.percentage_used}% used</span>
                   <span className={b.remaining >= 0 ? "text-emerald-600" : "text-red-600"}>
                     {b.remaining >= 0
-                      ? `₹${b.remaining.toLocaleString("en-IN", { minimumFractionDigits: 2 })} remaining`
-                      : `₹${Math.abs(b.remaining).toLocaleString("en-IN", { minimumFractionDigits: 2 })} over`}
+                      ? `${formatAmount(b.remaining, b.currency)} remaining`
+                      : `${formatAmount(Math.abs(b.remaining), b.currency)} over`}
                   </span>
                 </div>
               </CardContent>

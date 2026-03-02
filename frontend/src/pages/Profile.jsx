@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import api from "@/lib/api";
+import { CURRENCIES } from "@/lib/currencies";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { User, Mail, Calendar, Lock } from "lucide-react";
+import { Select } from "@/components/ui/select";
+import { User, Mail, Calendar, Lock, Coins } from "lucide-react";
 
 export default function Profile() {
   const { user, updateUser } = useAuth();
@@ -23,12 +25,18 @@ export default function Profile() {
   const [pwMsg, setPwMsg] = useState("");
   const [pwSaving, setPwSaving] = useState(false);
 
+  // Currency form
+  const [preferredCurrency, setPreferredCurrency] = useState("");
+  const [currencyMsg, setCurrencyMsg] = useState("");
+  const [currencySaving, setCurrencySaving] = useState(false);
+
   useEffect(() => {
     const fetchProfile = async () => {
       try {
         const res = await api.get("/auth/profile");
         setProfile(res.data.data);
         setName(res.data.data.name || "");
+        setPreferredCurrency(res.data.data.preferred_currency || "INR");
       } catch (err) {
         console.error(err);
       } finally {
@@ -76,6 +84,22 @@ export default function Profile() {
     }
   };
 
+  const handleUpdateCurrency = async (e) => {
+    e.preventDefault();
+    setCurrencyMsg("");
+    setCurrencySaving(true);
+    try {
+      const res = await api.put("/auth/profile", { preferred_currency: preferredCurrency });
+      setProfile(res.data.data);
+      updateUser({ ...user, preferred_currency: res.data.data.preferred_currency });
+      setCurrencyMsg("Preferred currency updated!");
+    } catch (err) {
+      setCurrencyMsg(err.response?.data?.message || "Error updating currency");
+    } finally {
+      setCurrencySaving(false);
+    }
+  };
+
   if (loading) {
     return <p className="text-muted-foreground text-center py-12">Loading profile...</p>;
   }
@@ -86,6 +110,44 @@ export default function Profile() {
         <h1 className="text-3xl font-bold tracking-tight">Profile</h1>
         <p className="text-muted-foreground">Manage your account details and password.</p>
       </div>
+
+      {/* Preferred Currency Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Coins className="h-5 w-5" />
+            Preferred Currency
+          </CardTitle>
+          <CardDescription>Set the default currency for new transactions and the dashboard.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleUpdateCurrency} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="preferredCurrency">Currency</Label>
+              <Select
+                id="preferredCurrency"
+                value={preferredCurrency}
+                onChange={(e) => setPreferredCurrency(e.target.value)}
+                className="max-w-xs"
+              >
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.code} — {c.name} ({c.symbol})
+                  </option>
+                ))}
+              </Select>
+            </div>
+            {currencyMsg && (
+              <p className={`text-sm ${currencyMsg.includes("updated") ? "text-emerald-600" : "text-destructive"}`}>
+                {currencyMsg}
+              </p>
+            )}
+            <Button type="submit" disabled={currencySaving}>
+              {currencySaving ? "Saving..." : "Save Currency"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
 
       {/* Account Info Card */}
       <Card>

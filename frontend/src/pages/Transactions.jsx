@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { useAuth } from "@/context/AuthContext";
 import api from "@/lib/api";
+import { CURRENCIES, formatAmount } from "@/lib/currencies";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,22 +11,29 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Pencil, Trash2, X } from "lucide-react";
 
 export default function Transactions() {
+  const { user } = useAuth();
+  const defaultCurrency = user?.preferred_currency || "INR";
+
   const [transactions, setTransactions] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [filterType, setFilterType] = useState("");
+  const [filterCurrency, setFilterCurrency] = useState("");
   const [form, setForm] = useState({
     category_id: "",
     amount: "",
     description: "",
     date: new Date().toISOString().split("T")[0],
+    currency: defaultCurrency,
   });
 
   const fetchData = async () => {
     try {
-      const params = filterType ? { type: filterType } : {};
+      const params = {};
+      if (filterType) params.type = filterType;
+      if (filterCurrency) params.currency = filterCurrency;
       const [txRes, catRes] = await Promise.all([
         api.get("/transactions", { params }),
         api.get("/categories"),
@@ -40,10 +49,10 @@ export default function Transactions() {
 
   useEffect(() => {
     fetchData();
-  }, [filterType]);
+  }, [filterType, filterCurrency]);
 
   const resetForm = () => {
-    setForm({ category_id: "", amount: "", description: "", date: new Date().toISOString().split("T")[0] });
+    setForm({ category_id: "", amount: "", description: "", date: new Date().toISOString().split("T")[0], currency: defaultCurrency });
     setEditingId(null);
     setShowForm(false);
   };
@@ -74,6 +83,7 @@ export default function Transactions() {
       amount: tx.amount,
       description: tx.description || "",
       date: tx.date?.split("T")[0] || "",
+      currency: tx.currency || defaultCurrency,
     });
     setEditingId(tx.id);
     setShowForm(true);
@@ -105,8 +115,8 @@ export default function Transactions() {
         </Button>
       </div>
 
-      {/* Filter */}
-      <div className="flex gap-2">
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2">
         {["", "income", "expense"].map((t) => (
           <Button
             key={t}
@@ -114,9 +124,23 @@ export default function Transactions() {
             size="sm"
             onClick={() => setFilterType(t)}
           >
-            {t === "" ? "All" : t.charAt(0).toUpperCase() + t.slice(1)}
+            {t === "" ? "All Types" : t.charAt(0).toUpperCase() + t.slice(1)}
           </Button>
         ))}
+        <div className="ml-auto">
+          <Select
+            value={filterCurrency}
+            onChange={(e) => setFilterCurrency(e.target.value)}
+            className="text-sm"
+          >
+            <option value="">All Currencies</option>
+            {CURRENCIES.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.code} — {c.name}
+              </option>
+            ))}
+          </Select>
+        </div>
       </div>
 
       {/* Form */}
@@ -137,6 +161,16 @@ export default function Transactions() {
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name} ({c.type})
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Currency</Label>
+                <Select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
+                  {CURRENCIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.code} — {c.name}
                     </option>
                   ))}
                 </Select>
@@ -214,7 +248,10 @@ export default function Transactions() {
                       tx.category_type === "income" ? "text-emerald-600" : "text-red-600"
                     }`}
                   >
-                    {tx.category_type === "income" ? "+" : "-"}₹{Math.abs(tx.amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                    {tx.category_type === "income" ? "+" : "-"}{formatAmount(tx.amount, tx.currency || "INR")}
+                    {tx.currency && tx.currency !== "INR" && (
+                      <span className="ml-1 text-xs font-normal text-muted-foreground">{tx.currency}</span>
+                    )}
                   </span>
                   <div className="flex gap-1">
                     <Button variant="ghost" size="icon" onClick={() => handleEdit(tx)}>
