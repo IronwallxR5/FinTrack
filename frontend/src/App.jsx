@@ -8,6 +8,7 @@ import Transactions from "@/pages/Transactions";
 import Categories from "@/pages/Categories";
 import Budgets from "@/pages/Budgets";
 import Profile from "@/pages/Profile";
+import Notifications from "@/pages/Notifications";
 import OAuthCallback from "@/pages/OAuthCallback";
 
 function ProtectedRoute({ children }) {
@@ -40,11 +41,12 @@ export default function App() {
             </ProtectedRoute>
           }
         >
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/transactions" element={<Transactions />} />
-          <Route path="/categories" element={<Categories />} />
-          <Route path="/budgets" element={<Budgets />} />
-          <Route path="/profile" element={<Profile />} />
+          <Route path="/dashboard"      element={<Dashboard />} />
+          <Route path="/transactions"    element={<Transactions />} />
+          <Route path="/categories"      element={<Categories />} />
+          <Route path="/budgets"         element={<Budgets />} />
+          <Route path="/notifications"   element={<Notifications />} />
+          <Route path="/profile"         element={<Profile />} />
         </Route>
 
         {/* Redirect root */}

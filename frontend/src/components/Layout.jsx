@@ -1,25 +1,28 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
+import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard,
   ArrowLeftRight,
   Tags,
   PiggyBank,
+  Bell,
   LogOut,
   Menu,
   X,
   Wallet,
   UserCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const navItems = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/transactions", label: "Transactions", icon: ArrowLeftRight },
-  { to: "/categories", label: "Categories", icon: Tags },
-  { to: "/budgets", label: "Budgets", icon: PiggyBank },
-  { to: "/profile", label: "Profile", icon: UserCircle },
+  { to: "/dashboard",     label: "Dashboard",     icon: LayoutDashboard },
+  { to: "/transactions",  label: "Transactions",  icon: ArrowLeftRight },
+  { to: "/categories",   label: "Categories",    icon: Tags },
+  { to: "/budgets",      label: "Budgets",        icon: PiggyBank },
+  { to: "/notifications",label: "Notifications", icon: Bell, badge: true },
+  { to: "/profile",      label: "Profile",        icon: UserCircle },
 ];
 
 export default function Layout() {
@@ -27,6 +30,23 @@ export default function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Poll for unread notification count every 60 seconds
+  useEffect(() => {
+    let cancelled = false;
+    const fetchUnread = async () => {
+      try {
+        const res = await api.get("/notifications/unread-count");
+        if (!cancelled) setUnreadCount(res.data.unread || 0);
+      } catch {
+        // Silently ignore — the badge just won't update
+      }
+    };
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 60000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -70,14 +90,21 @@ export default function Layout() {
                     key={item.to}
                     to={item.to}
                     onClick={() => setSidebarOpen(false)}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
+                    className={`flex items-center justify-between px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
                       isActive
                         ? "bg-primary text-primary-foreground"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground"
                     }`}
                   >
-                    <Icon className="h-4 w-4" />
-                    {item.label}
+                    <span className="flex items-center gap-3">
+                      <Icon className="h-4 w-4" />
+                      {item.label}
+                    </span>
+                    {item.badge && unreadCount > 0 && (
+                      <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                        {unreadCount > 99 ? "99+" : unreadCount}
+                      </span>
+                    )}
                   </Link>
                 );
               })}
