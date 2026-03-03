@@ -354,10 +354,89 @@ const deleteTransaction = async (req, res, next) => {
   }
 };
 
+const path = require("path");
+const fs   = require("fs");
+
+const uploadReceipt = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { id }  = req.params;
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file uploaded." });
+    }
+
+    const txRes = await pool.query(
+      "SELECT id, receipt_url FROM transactions WHERE id = $1 AND user_id = $2",
+      [id, userId]
+    );
+    if (txRes.rows.length === 0) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(404).json({ success: false, message: "Transaction not found." });
+    }
+
+    const old = txRes.rows[0].receipt_url;
+    if (old) {
+      const oldPath = path.join(__dirname, "../", old.replace(/^\//, ""));
+      fs.unlink(oldPath, () => {});
+    }
+
+    const receiptUrl = `/uploads/receipts/${req.file.filename}`;
+
+    await pool.query(
+      "UPDATE transactions SET receipt_url = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3",
+      [receiptUrl, id, userId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Receipt uploaded.",
+      data: { receipt_url: receiptUrl },
+    });
+  } catch (err) {
+    if (req.file) fs.unlink(req.file.path, () => {});
+    next(err);
+  }
+};
+
+const deleteReceipt = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { id }  = req.params;
+
+    const txRes = await pool.query(
+      "SELECT receipt_url FROM transactions WHERE id = $1 AND user_id = $2",
+      [id, userId]
+    );
+    if (txRes.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Transaction not found." });
+    }
+
+    const receiptUrl = txRes.rows[0].receipt_url;
+    if (!receiptUrl) {
+      return res.status(404).json({ success: false, message: "No receipt attached to this transaction." });
+    }
+
+    const filePath = path.join(__dirname, "../", receiptUrl.replace(/^\//, ""));
+    fs.unlink(filePath, () => {});
+
+    await pool.query(
+      "UPDATE transactions SET receipt_url = NULL, updated_at = NOW() WHERE id = $1 AND user_id = $2",
+      [id, userId]
+    );
+
+    return res.status(200).json({ success: true, message: "Receipt deleted." });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   createTransaction,
   getTransactions,
   getTransactionById,
   updateTransaction,
   deleteTransaction,
+  uploadReceipt,
+  deleteReceipt,
 };

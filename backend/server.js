@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const session = require("express-session");
+const path = require("path");
 require("dotenv").config();
 
 const runMigrations = require("./config/migrate");
@@ -39,6 +40,7 @@ app.use("/api/transactions", transactionRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/budgets", budgetRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 app.use(errorHandler);
 
