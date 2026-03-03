@@ -1,6 +1,7 @@
 const pool = require("../config/db");
 const { isValidUUID, isValidDate } = require("../middlewares/validate");
 const { SUPPORTED_CURRENCIES } = require("../config/currencies");
+const { checkBudgetAndNotify } = require("../services/notificationService");
 
 const normaliseAmount = (amount) => {
   return parseFloat(Number(amount).toFixed(2));
@@ -98,10 +99,14 @@ const createTransaction = async (req, res, next) => {
       ]
     );
 
+    const savedTx = result.rows[0];
+
+    checkBudgetAndNotify(userId, category_id || null, currency).catch(() => {});
+
     return res.status(201).json({
       success: true,
       message: "Transaction created.",
-      data: result.rows[0],
+      data: savedTx,
     });
   } catch (err) {
     next(err);

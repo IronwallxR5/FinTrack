@@ -10,6 +10,7 @@ const categoryRoutes = require("./routes/categoryRoutes");
 const transactionRoutes = require("./routes/transactionRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const budgetRoutes = require("./routes/budgetRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 const errorHandler = require("./middlewares/errorHandler");
 
 const app = express();
@@ -37,6 +38,7 @@ app.use("/api/categories", categoryRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/budgets", budgetRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 app.use(errorHandler);
 
