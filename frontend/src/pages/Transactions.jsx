@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
 import api from "@/lib/api";
 import { CURRENCIES, formatAmount } from "@/lib/currencies";
@@ -8,7 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, X } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Paperclip, ExternalLink, FileText } from "lucide-react";
+
+// Construct backend origin from the API base URL (strip /api suffix)
+const BACKEND_ORIGIN = (import.meta.env.VITE_API_URL || "http://localhost:3000/api").replace(/\/api$/, "");
 
 export default function Transactions() {
   const { user } = useAuth();
@@ -21,6 +24,9 @@ export default function Transactions() {
   const [editingId, setEditingId] = useState(null);
   const [filterType, setFilterType] = useState("");
   const [filterCurrency, setFilterCurrency] = useState("");
+  const [uploadingId, setUploadingId] = useState(null); // txId currently being uploaded
+  const fileInputRef = useRef(null);
+  const pendingTxId  = useRef(null); // which tx the hidden file input is targeting
   const [form, setForm] = useState({
     category_id: "",
     amount: "",
@@ -99,12 +105,63 @@ export default function Transactions() {
     }
   };
 
+  // ── Receipt handlers ───────────────────────────────────────────────────────
+  const triggerReceiptPicker = (txId) => {
+    pendingTxId.current = txId;
+    fileInputRef.current.value = ""; // reset so same file can be re-selected
+    fileInputRef.current.click();
+  };
+
+  const handleReceiptFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    const txId = pendingTxId.current;
+    if (!file || !txId) return;
+    setUploadingId(txId);
+    try {
+      const fd = new FormData();
+      fd.append("receipt", file);
+      const res = await api.post(`/transactions/${txId}/receipt`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      // Update only the affected transaction in local state (no full refetch needed)
+      setTransactions((prev) =>
+        prev.map((tx) =>
+          tx.id === txId ? { ...tx, receipt_url: res.data.data.receipt_url } : tx
+        )
+      );
+    } catch (err) {
+      alert(err.response?.data?.message || "Upload failed");
+    } finally {
+      setUploadingId(null);
+    }
+  };
+
+  const handleReceiptDelete = async (txId) => {
+    if (!confirm("Remove this receipt?")) return;
+    try {
+      await api.delete(`/transactions/${txId}/receipt`);
+      setTransactions((prev) =>
+        prev.map((tx) => (tx.id === txId ? { ...tx, receipt_url: null } : tx))
+      );
+    } catch (err) {
+      alert(err.response?.data?.message || "Error removing receipt");
+    }
+  };
+
   if (loading) {
     return <p className="text-muted-foreground text-center py-12">Loading transactions...</p>;
   }
 
   return (
     <div className="space-y-6">
+      {/* Hidden file input shared across all transactions */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+        className="hidden"
+        onChange={handleReceiptFileChange}
+      />
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Transactions</h1>
@@ -222,49 +279,126 @@ export default function Transactions() {
         </Card>
       ) : (
         <div className="space-y-2">
-          {transactions.map((tx) => (
+          {transactions.map((tx) => {
+            const receiptUrl = tx.receipt_url
+              ? `${BACKEND_ORIGIN}${tx.receipt_url}`
+              : null;
+            const isImage = receiptUrl && /\.(jpe?g|png|webp|gif)$/i.test(tx.receipt_url);
+            const isUploading = uploadingId === tx.id;
+
+            return (
             <Card key={tx.id} className="hover:shadow-md transition-shadow">
-              <CardContent className="py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium truncate">{tx.description || "No description"}</span>
-                    {tx.category_name && (
-                      <Badge variant={tx.category_type === "income" ? "success" : "secondary"}>
-                        {tx.category_name}
-                      </Badge>
-                    )}
+              <CardContent className="py-4 flex flex-col gap-3">
+                {/* Top row: description + amount + action buttons */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium truncate">{tx.description || "No description"}</span>
+                      {tx.category_name && (
+                        <Badge variant={tx.category_type === "income" ? "success" : "secondary"}>
+                          {tx.category_name}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {new Date(tx.date).toLocaleDateString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </p>
                   </div>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {new Date(tx.date).toLocaleDateString("en-IN", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </p>
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`text-lg font-semibold whitespace-nowrap ${
+                        tx.category_type === "income" ? "text-emerald-600" : "text-red-600"
+                      }`}
+                    >
+                      {tx.category_type === "income" ? "+" : "-"}{formatAmount(tx.amount, tx.currency || "INR")}
+                      {tx.currency && tx.currency !== "INR" && (
+                        <span className="ml-1 text-xs font-normal text-muted-foreground">{tx.currency}</span>
+                      )}
+                    </span>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => handleEdit(tx)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleDelete(tx.id)}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span
-                    className={`text-lg font-semibold whitespace-nowrap ${
-                      tx.category_type === "income" ? "text-emerald-600" : "text-red-600"
-                    }`}
-                  >
-                    {tx.category_type === "income" ? "+" : "-"}{formatAmount(tx.amount, tx.currency || "INR")}
-                    {tx.currency && tx.currency !== "INR" && (
-                      <span className="ml-1 text-xs font-normal text-muted-foreground">{tx.currency}</span>
-                    )}
-                  </span>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" onClick={() => handleEdit(tx)}>
-                      <Pencil className="h-4 w-4" />
+
+                {/* Receipt row */}
+                <div className="flex items-center gap-2 flex-wrap border-t pt-2">
+                  {receiptUrl ? (
+                    <>
+                      {/* Thumbnail or PDF icon */}
+                      {isImage ? (
+                        <a href={receiptUrl} target="_blank" rel="noreferrer">
+                          <img
+                            src={receiptUrl}
+                            alt="receipt"
+                            className="h-10 w-10 rounded object-cover border hover:opacity-80 transition-opacity"
+                          />
+                        </a>
+                      ) : (
+                        <a
+                          href={receiptUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center justify-center h-10 w-10 rounded border bg-muted hover:bg-muted/70 transition-colors"
+                          title="View PDF"
+                        >
+                          <FileText className="h-5 w-5 text-muted-foreground" />
+                        </a>
+                      )}
+                      <a
+                        href={receiptUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                      >
+                        View receipt <ExternalLink className="h-3 w-3" />
+                      </a>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs text-muted-foreground h-7 px-2"
+                        onClick={() => triggerReceiptPicker(tx.id)}
+                        disabled={isUploading}
+                      >
+                        <Paperclip className="h-3 w-3 mr-1" />
+                        Replace
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs text-destructive h-7 px-2"
+                        onClick={() => handleReceiptDelete(tx.id)}
+                      >
+                        <Trash2 className="h-3 w-3 mr-1" />
+                        Remove
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs text-muted-foreground h-7 px-2"
+                      onClick={() => triggerReceiptPicker(tx.id)}
+                      disabled={isUploading}
+                    >
+                      <Paperclip className="h-3 w-3 mr-1" />
+                      {isUploading ? "Uploading…" : "Attach receipt"}
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(tx.id)}>
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
-          ))}
+          );
+          })}
         </div>
       )}
     </div>
