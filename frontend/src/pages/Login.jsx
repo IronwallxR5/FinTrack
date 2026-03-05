@@ -23,7 +23,16 @@ export default function Login() {
       await login(email, password);
       navigate("/dashboard");
     } catch (err) {
-      setError(err.response?.data?.message || "Login failed");
+      const status = err.response?.status;
+      if (status === 401) {
+        setError("No account found with this email, or password is incorrect.");
+      } else if (status === 400) {
+        setError(err.response.data.message || "Please check your input.");
+      } else if (!err.response) {
+        setError("Cannot reach the server. Check your connection and try again.");
+      } else {
+        setError(err.response?.data?.message || "Login failed. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -91,7 +100,7 @@ export default function Login() {
 
           {/* Google OAuth */}
           <a
-            href="http://localhost:3000/api/auth/google"
+            href={`${import.meta.env.VITE_API_URL || "http://localhost:3000/api"}/auth/google`}
             className="flex items-center justify-center gap-3 w-full border rounded-md px-4 py-2 text-sm font-medium hover:bg-muted/50 transition-colors"
           >
             <GoogleIcon />

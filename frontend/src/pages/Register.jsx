@@ -31,7 +31,16 @@ export default function Register() {
       await register(email, password, name);
       navigate("/dashboard");
     } catch (err) {
-      setError(err.response?.data?.message || "Registration failed");
+      const status = err.response?.status;
+      if (status === 409) {
+        setError("An account with this email already exists. Please log in instead.");
+      } else if (status === 400) {
+        setError(err.response.data.message || "Please check your input.");
+      } else if (!err.response) {
+        setError("Cannot reach the server. Check your connection and try again.");
+      } else {
+        setError(err.response?.data?.message || "Registration failed. Please try again.");
+      }
     } finally {
       setLoading(false);
     }

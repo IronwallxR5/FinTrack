@@ -13,13 +13,15 @@ import AIAdvisor from "@/pages/AIAdvisor";
 import OAuthCallback from "@/pages/OAuthCallback";
 
 function ProtectedRoute({ children }) {
-  const { token } = useAuth();
+  const { token, loading } = useAuth();
+  if (loading) return null; // wait for auth state to hydrate from localStorage
   if (!token) return <Navigate to="/login" replace />;
   return children;
 }
 
 function GuestRoute({ children }) {
-  const { token } = useAuth();
+  const { token, loading } = useAuth();
+  if (loading) return null;
   if (token) return <Navigate to="/dashboard" replace />;
   return children;
 }
