@@ -24,14 +24,17 @@ export default function Login() {
       navigate("/dashboard");
     } catch (err) {
       const status = err.response?.status;
-      if (status === 401) {
-        setError("No account found with this email, or password is incorrect.");
+      const msg = err.response?.data?.message;
+      if (status === 404) {
+        setError(msg || "No account found with this email. Please sign up first.");
+      } else if (status === 401) {
+        setError(msg || "Incorrect password. Please try again.");
       } else if (status === 400) {
-        setError(err.response.data.message || "Please check your input.");
+        setError(msg || "Please check your input.");
       } else if (!err.response) {
         setError("Cannot reach the server. Check your connection and try again.");
       } else {
-        setError(err.response?.data?.message || "Login failed. Please try again.");
+        setError(msg || "Login failed. Please try again.");
       }
     } finally {
       setLoading(false);

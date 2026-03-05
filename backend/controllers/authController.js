@@ -114,9 +114,9 @@ const login = async (req, res, next) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(401).json({
+      return res.status(404).json({
         success: false,
-        message: "Invalid email or password.",
+        message: "No account found with this email. Please sign up first.",
       });
     }
 
@@ -127,7 +127,7 @@ const login = async (req, res, next) => {
     if (!isMatch) {
       return res.status(401).json({
         success: false,
-        message: "Invalid email or password.",
+        message: "Incorrect password. Please try again.",
       });
     }
 

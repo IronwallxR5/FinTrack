@@ -7,7 +7,6 @@ const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-// Attach JWT to every request automatically
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
   if (token) {
@@ -16,15 +15,13 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// On 401, clear token and redirect to login
-// Skip redirect for login/register endpoints so their error handlers can show messages
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    if (err.response?.status === 401 || err.response?.status === 404) {
       const url = err.config?.url || "";
-      const isAuthRoute = url.includes("/auth/login") || url.includes("/auth/register");
-      if (!isAuthRoute) {
+      const isAuthRoute = url.includes("/auth/login") || url.includes("/auth/register") || url.includes("/auth/profile");
+      if (!isAuthRoute && err.response?.status === 401) {
         localStorage.removeItem("token");
         localStorage.removeItem("user");
         window.location.href = "/login";
