@@ -13,6 +13,7 @@ import {
   X,
   Wallet,
   UserCircle,
+  Sparkles,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -22,6 +23,7 @@ const navItems = [
   { to: "/categories",   label: "Categories",    icon: Tags },
   { to: "/budgets",      label: "Budgets",        icon: PiggyBank },
   { to: "/notifications",label: "Notifications", icon: Bell, badge: true },
+  { to: "/ai-advisor",    label: "AI Advisor",    icon: Sparkles },
   { to: "/profile",      label: "Profile",        icon: UserCircle },
 ];
 

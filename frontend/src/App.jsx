@@ -9,6 +9,7 @@ import Categories from "@/pages/Categories";
 import Budgets from "@/pages/Budgets";
 import Profile from "@/pages/Profile";
 import Notifications from "@/pages/Notifications";
+import AIAdvisor from "@/pages/AIAdvisor";
 import OAuthCallback from "@/pages/OAuthCallback";
 
 function ProtectedRoute({ children }) {
@@ -46,6 +47,7 @@ export default function App() {
           <Route path="/categories"      element={<Categories />} />
           <Route path="/budgets"         element={<Budgets />} />
           <Route path="/notifications"   element={<Notifications />} />
+          <Route path="/ai-advisor"       element={<AIAdvisor />} />
           <Route path="/profile"         element={<Profile />} />
         </Route>
 

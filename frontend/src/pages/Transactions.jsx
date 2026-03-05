@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, X, Paperclip, ExternalLink, FileText } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Paperclip, ExternalLink, FileText, Sparkles } from "lucide-react";
 
 // Construct backend origin from the API base URL (strip /api suffix)
 const BACKEND_ORIGIN = (import.meta.env.VITE_API_URL || "http://localhost:3000/api").replace(/\/api$/, "");
@@ -25,6 +25,7 @@ export default function Transactions() {
   const [filterType, setFilterType] = useState("");
   const [filterCurrency, setFilterCurrency] = useState("");
   const [uploadingId, setUploadingId] = useState(null); // txId currently being uploaded
+  const [suggestingCategory, setSuggestingCategory] = useState(false);
   const fileInputRef = useRef(null);
   const pendingTxId  = useRef(null); // which tx the hidden file input is targeting
   const [form, setForm] = useState({
@@ -102,6 +103,31 @@ export default function Transactions() {
       fetchData();
     } catch (err) {
       alert(err.response?.data?.message || "Error deleting");
+    }
+  };
+
+  // ── AI category suggestion ─────────────────────────────────────────────────
+  const handleSuggestCategory = async () => {
+    if (!form.description.trim()) return;
+    setSuggestingCategory(true);
+    try {
+      const res = await api.post("/ai/categorize", { description: form.description });
+      const { category_id, category_name, confidence, reason } = res.data;
+      if (category_id) {
+        setForm((prev) => ({ ...prev, category_id }));
+        const conf = confidence === "high" ? "✓" : confidence === "medium" ? "~" : "?";
+        alert(`${conf} Suggested: ${category_name}\n${reason || ""}`);
+      } else {
+        alert("No matching category found. Try a more descriptive name.");
+      }
+    } catch (err) {
+      if (err.response?.status === 503) {
+        alert("AI features are not configured yet. Add GROQ_API_KEY to your backend .env");
+      } else {
+        alert(err.response?.data?.message || "Could not suggest category");
+      }
+    } finally {
+      setSuggestingCategory(false);
     }
   };
 
@@ -245,11 +271,23 @@ export default function Transactions() {
               </div>
               <div className="space-y-2">
                 <Label>Description</Label>
-                <Input
-                  placeholder="What was this for?"
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                />
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="What was this for?"
+                    value={form.description}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    title="AI: suggest category from description"
+                    disabled={suggestingCategory || !form.description.trim()}
+                    onClick={handleSuggestCategory}
+                  >
+                    <Sparkles className={`h-4 w-4 ${suggestingCategory ? "animate-pulse" : ""}`} />
+                  </Button>
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Date</Label>
