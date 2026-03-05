@@ -17,7 +17,8 @@ const errorHandler = require("./middlewares/errorHandler");
 
 const app = express();
 
-app.use(cors({ origin: process.env.FRONTEND_URL || "*", credentials: true }));
+const frontendUrl = (process.env.FRONTEND_URL || "*").replace(/\/$/, "");
+app.use(cors({ origin: frontendUrl, credentials: true }));
 app.use(express.json());
 
 app.use(
