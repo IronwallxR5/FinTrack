@@ -17,16 +17,23 @@ const errorHandler = require("./middlewares/errorHandler");
 
 const app = express();
 
+app.set("trust proxy", 1);
+
 const frontendUrl = (process.env.FRONTEND_URL || "*").replace(/\/$/, "");
 app.use(cors({ origin: frontendUrl, credentials: true }));
 app.use(express.json());
 
+const isProduction = process.env.NODE_ENV === "production";
 app.use(
   session({
     secret: process.env.JWT_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, maxAge: 5 * 60 * 1000 },
+    cookie: {
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
+      maxAge: 5 * 60 * 1000,
+    },
   })
 );
 app.use(passport.initialize());
