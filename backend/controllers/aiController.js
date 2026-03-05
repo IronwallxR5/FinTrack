@@ -19,10 +19,9 @@ async function buildFinancialContext(userId) {
   const summaryRes = await pool.query(
     `SELECT
        currency,
-       SUM(CASE WHEN c.type = 'income'  THEN ABS(t.amount) ELSE 0 END) AS total_income,
-       SUM(CASE WHEN c.type = 'expense' THEN ABS(t.amount) ELSE 0 END) AS total_expenses
+       SUM(CASE WHEN t.type = 'income'  THEN ABS(t.amount) ELSE 0 END) AS total_income,
+       SUM(CASE WHEN t.type = 'expense' THEN ABS(t.amount) ELSE 0 END) AS total_expenses
      FROM transactions t
-     LEFT JOIN categories c ON c.id = t.category_id
      WHERE t.user_id = $1
      GROUP BY t.currency`,
     [userId]
@@ -30,8 +29,8 @@ async function buildFinancialContext(userId) {
 
   const monthlyRes = await pool.query(
     `SELECT
-       c.name AS category,
-       c.type,
+       COALESCE(c.name, 'Uncategorized') AS category,
+       t.type,
        t.currency,
        SUM(ABS(t.amount)) AS total
      FROM transactions t
@@ -39,7 +38,7 @@ async function buildFinancialContext(userId) {
      WHERE t.user_id = $1
        AND EXTRACT(YEAR  FROM t.date) = $2
        AND EXTRACT(MONTH FROM t.date) = $3
-     GROUP BY c.name, c.type, t.currency
+     GROUP BY c.name, t.type, t.currency
      ORDER BY total DESC
      LIMIT 10`,
     [userId, year, month]
@@ -47,7 +46,7 @@ async function buildFinancialContext(userId) {
 
   const recentRes = await pool.query(
     `SELECT t.date, t.amount, t.description, t.currency,
-            c.name AS category, c.type AS category_type
+            COALESCE(c.name, 'Uncategorized') AS category, t.type AS category_type
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
      WHERE t.user_id = $1

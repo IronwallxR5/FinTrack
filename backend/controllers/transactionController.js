@@ -64,6 +64,8 @@ const createTransaction = async (req, res, next) => {
       });
     }
 
+    let txType = req.body.type;
+
     if (category_id) {
       if (!isValidUUID(category_id)) {
         return res.status(400).json({
@@ -83,11 +85,16 @@ const createTransaction = async (req, res, next) => {
           message: "Category not found or does not belong to you.",
         });
       }
+      txType = cat.rows[0].type;
+    } else {
+      if (!txType || !["income", "expense"].includes(txType)) {
+        txType = "expense";
+      }
     }
 
     const result = await pool.query(
-      `INSERT INTO transactions (user_id, category_id, amount, description, date, currency)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO transactions (user_id, category_id, amount, description, date, currency, type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
       [
         userId,
@@ -96,6 +103,7 @@ const createTransaction = async (req, res, next) => {
         description || null,
         date || new Date(),
         currency,
+        txType,
       ]
     );
 
@@ -153,7 +161,7 @@ const getTransactions = async (req, res, next) => {
     }
 
     if (type && ["income", "expense"].includes(type)) {
-      query += ` AND c.type = $${idx++}`;
+      query += ` AND t.type = $${idx++}`;
       params.push(type);
     }
 
@@ -246,7 +254,7 @@ const updateTransaction = async (req, res, next) => {
           return res.status(400).json({ success: false, message: "category_id must be a valid UUID." });
         }
         const cat = await pool.query(
-          "SELECT id FROM categories WHERE id = $1 AND user_id = $2",
+          "SELECT id, type FROM categories WHERE id = $1 AND user_id = $2",
           [category_id, userId]
         );
         if (cat.rows.length === 0) {
@@ -255,9 +263,19 @@ const updateTransaction = async (req, res, next) => {
             message: "Category not found or does not belong to you.",
           });
         }
+        fields.push(`type = $${idx++}`);
+        params.push(cat.rows[0].type);
       }
       fields.push(`category_id = $${idx++}`);
       params.push(category_id);
+    }
+
+    // Allow explicit type update (only when no category or clearing category)
+    if (req.body.type !== undefined && category_id === undefined) {
+      if (["income", "expense"].includes(req.body.type)) {
+        fields.push(`type = $${idx++}`);
+        params.push(req.body.type);
+      }
     }
 
     if (amount !== undefined) {

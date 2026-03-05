@@ -34,6 +34,7 @@ export default function Transactions() {
     description: "",
     date: new Date().toISOString().split("T")[0],
     currency: defaultCurrency,
+    type: "expense",
   });
 
   const fetchData = async () => {
@@ -59,7 +60,7 @@ export default function Transactions() {
   }, [filterType, filterCurrency]);
 
   const resetForm = () => {
-    setForm({ category_id: "", amount: "", description: "", date: new Date().toISOString().split("T")[0], currency: defaultCurrency });
+    setForm({ category_id: "", amount: "", description: "", date: new Date().toISOString().split("T")[0], currency: defaultCurrency, type: "expense" });
     setEditingId(null);
     setShowForm(false);
   };
@@ -91,6 +92,7 @@ export default function Transactions() {
       description: tx.description || "",
       date: tx.date?.split("T")[0] || "",
       currency: tx.currency || defaultCurrency,
+      type: tx.type || "expense",
     });
     setEditingId(tx.id);
     setShowForm(true);
@@ -239,7 +241,11 @@ export default function Transactions() {
             <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Category</Label>
-                <Select value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
+                <Select value={form.category_id} onChange={(e) => {
+                  const catId = e.target.value;
+                  const cat = categories.find((c) => String(c.id) === catId);
+                  setForm({ ...form, category_id: catId, ...(cat ? { type: cat.type } : {}) });
+                }}>
                   <option value="">Uncategorized</option>
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -247,6 +253,20 @@ export default function Transactions() {
                     </option>
                   ))}
                 </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <Select
+                  value={form.type}
+                  onChange={(e) => setForm({ ...form, type: e.target.value })}
+                  disabled={!!form.category_id}
+                >
+                  <option value="income">Income</option>
+                  <option value="expense">Expense</option>
+                </Select>
+                {form.category_id && (
+                  <p className="text-xs text-muted-foreground">Auto-set from category</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Currency</Label>
@@ -332,11 +352,9 @@ export default function Transactions() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium truncate">{tx.description || "No description"}</span>
-                      {tx.category_name && (
-                        <Badge variant={tx.category_type === "income" ? "success" : "secondary"}>
-                          {tx.category_name}
-                        </Badge>
-                      )}
+                      <Badge variant={tx.type === "income" ? "success" : "secondary"}>
+                        {tx.category_name || "Uncategorized"}
+                      </Badge>
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">
                       {new Date(tx.date).toLocaleDateString("en-IN", {
@@ -349,10 +367,10 @@ export default function Transactions() {
                   <div className="flex items-center gap-3">
                     <span
                       className={`text-lg font-semibold whitespace-nowrap ${
-                        tx.category_type === "income" ? "text-emerald-600" : "text-red-600"
+                        tx.type === "income" ? "text-emerald-600" : "text-red-600"
                       }`}
                     >
-                      {tx.category_type === "income" ? "+" : "-"}{formatAmount(tx.amount, tx.currency || "INR")}
+                      {tx.type === "income" ? "+" : "-"}{formatAmount(tx.amount, tx.currency || "INR")}
                       {tx.currency && tx.currency !== "INR" && (
                         <span className="ml-1 text-xs font-normal text-muted-foreground">{tx.currency}</span>
                       )}

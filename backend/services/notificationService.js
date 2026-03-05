@@ -1,15 +1,19 @@
 const pool = require("../config/db");
 const { sendEmail } = require("../config/email");
+const { getExchangeRates, convertCurrency } = require("./exchangeRates");
 
 /**
  * After an expense transaction is saved, check whether any budget thresholds
  * have been crossed this month and send notifications accordingly.
  *
+ * Aggregates spending across ALL currencies (converted to the budget's currency)
+ * so that cross-currency transactions are properly tracked against budgets.
+ *
  * @param {string} userId
  * @param {string|null} categoryId
- * @param {string} transactionCurrency
+ * @param {string} transactionCurrency  (unused now — kept for API compat)
  */
-async function checkBudgetAndNotify(userId, categoryId, transactionCurrency) {
+async function checkBudgetAndNotify(userId, categoryId, _transactionCurrency) {
   if (!categoryId) return;
 
   try {
@@ -18,9 +22,8 @@ async function checkBudgetAndNotify(userId, categoryId, transactionCurrency) {
        FROM   budgets b
        JOIN   categories c ON c.id = b.category_id
        WHERE  b.user_id      = $1
-         AND  b.category_id  = $2
-         AND  b.currency     = $3`,
-      [userId, categoryId, transactionCurrency]
+         AND  b.category_id  = $2`,
+      [userId, categoryId]
     );
 
     if (budgetRes.rows.length === 0) return;
@@ -32,17 +35,29 @@ async function checkBudgetAndNotify(userId, categoryId, transactionCurrency) {
     const year = now.getFullYear();
 
     const spentRes = await pool.query(
-      `SELECT COALESCE(SUM(ABS(amount)), 0) AS spent
+      `SELECT currency, COALESCE(SUM(ABS(amount)), 0) AS spent
        FROM   transactions
        WHERE  user_id     = $1
          AND  category_id = $2
-         AND  currency    = $3
-         AND  EXTRACT(YEAR  FROM date) = $4
-         AND  EXTRACT(MONTH FROM date) = $5`,
-      [userId, categoryId, budget.currency, year, month]
+         AND  EXTRACT(YEAR  FROM date) = $3
+         AND  EXTRACT(MONTH FROM date) = $4
+       GROUP BY currency`,
+      [userId, categoryId, year, month]
     );
 
-    const spent = parseFloat(spentRes.rows[0].spent);
+    // Convert all currencies to the budget's currency
+    let rates = {};
+    try {
+      const ratesData = await getExchangeRates();
+      rates = ratesData.rates;
+    } catch (err) {
+      console.warn("[NotificationService] Could not fetch exchange rates:", err.message);
+    }
+
+    const spent = spentRes.rows.reduce((sum, row) => {
+      return sum + convertCurrency(parseFloat(row.spent), row.currency, budget.currency, rates);
+    }, 0);
+
     const limit = parseFloat(budget.monthly_limit);
     const pct   = limit > 0 ? (spent / limit) * 100 : 0;
 

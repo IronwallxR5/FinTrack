@@ -1,5 +1,6 @@
 const pool = require("../config/db");
 const { SUPPORTED_CURRENCIES } = require("../config/currencies");
+const { getExchangeRates } = require("../services/exchangeRates");
 
 const isValidYear = (v) => /^\d{4}$/.test(v) && Number(v) >= 1900 && Number(v) <= 2100;
 const isValidMonth = (v) => /^\d{1,2}$/.test(v) && Number(v) >= 1 && Number(v) <= 12;
@@ -39,13 +40,12 @@ const getSummary = async (req, res, next) => {
     const result = await pool.query(
       `SELECT
          t.currency,
-         COALESCE(SUM(CASE WHEN c.type = 'income'  THEN t.amount ELSE 0 END), 0) AS total_income,
-         COALESCE(SUM(CASE WHEN c.type = 'expense' THEN ABS(t.amount) ELSE 0 END), 0) AS total_expenses,
-         COALESCE(SUM(CASE WHEN c.type = 'income'  THEN t.amount
-                            WHEN c.type = 'expense' THEN -ABS(t.amount)
+         COALESCE(SUM(CASE WHEN t.type = 'income'  THEN ABS(t.amount) ELSE 0 END), 0) AS total_income,
+         COALESCE(SUM(CASE WHEN t.type = 'expense' THEN ABS(t.amount) ELSE 0 END), 0) AS total_expenses,
+         COALESCE(SUM(CASE WHEN t.type = 'income'  THEN ABS(t.amount)
+                            WHEN t.type = 'expense' THEN -ABS(t.amount)
                             ELSE 0 END), 0) AS net_savings
        FROM transactions t
-       LEFT JOIN categories c ON t.category_id = c.id
        WHERE t.user_id = $1 ${filter}
        GROUP BY t.currency
        ORDER BY t.currency`,
@@ -100,13 +100,12 @@ const getMonthlyReport = async (req, res, next) => {
          t.currency,
          EXTRACT(YEAR  FROM t.date)::INT AS year,
          EXTRACT(MONTH FROM t.date)::INT AS month,
-         COALESCE(SUM(CASE WHEN c.type = 'income'  THEN t.amount ELSE 0 END), 0) AS total_income,
-         COALESCE(SUM(CASE WHEN c.type = 'expense' THEN ABS(t.amount) ELSE 0 END), 0) AS total_expenses,
-         COALESCE(SUM(CASE WHEN c.type = 'income'  THEN t.amount
-                            WHEN c.type = 'expense' THEN -ABS(t.amount)
+         COALESCE(SUM(CASE WHEN t.type = 'income'  THEN ABS(t.amount) ELSE 0 END), 0) AS total_income,
+         COALESCE(SUM(CASE WHEN t.type = 'expense' THEN ABS(t.amount) ELSE 0 END), 0) AS total_expenses,
+         COALESCE(SUM(CASE WHEN t.type = 'income'  THEN ABS(t.amount)
+                            WHEN t.type = 'expense' THEN -ABS(t.amount)
                             ELSE 0 END), 0) AS net_savings
        FROM transactions t
-       LEFT JOIN categories c ON t.category_id = c.id
        WHERE t.user_id = $1 ${currencyFilter}
        GROUP BY t.currency, year, month
        ORDER BY year DESC, month DESC, t.currency`,
@@ -160,7 +159,7 @@ const getCategoryBreakdown = async (req, res, next) => {
       params.push(month);
     }
     if (type && ["income", "expense"].includes(type)) {
-      typeFilter = ` AND c.type = $${idx++}`;
+      typeFilter = ` AND t.type = $${idx++}`;
       params.push(type);
     }
     let currencyFilter2 = "";
@@ -171,15 +170,15 @@ const getCategoryBreakdown = async (req, res, next) => {
 
     const result = await pool.query(
       `SELECT
-         c.id   AS category_id,
-         c.name AS category_name,
-         c.type AS category_type,
+         t.category_id,
+         COALESCE(c.name, 'Uncategorized') AS category_name,
+         t.type AS category_type,
          COALESCE(SUM(ABS(t.amount)), 0) AS total_amount,
          COUNT(t.id)::INT AS transaction_count
        FROM transactions t
-       JOIN categories c ON t.category_id = c.id
+       LEFT JOIN categories c ON t.category_id = c.id
        WHERE t.user_id = $1 ${dateFilter} ${typeFilter} ${currencyFilter2}
-       GROUP BY c.id, c.name, c.type
+       GROUP BY t.category_id, c.name, t.type
        ORDER BY total_amount DESC`,
       params
     );
@@ -201,11 +200,22 @@ const getCategoryBreakdown = async (req, res, next) => {
 
 let _ratesCache = null;
 let _ratesCachedAt = null;
-const RATES_TTL = 60 * 60 * 1000;
 
 const getRates = async (req, res, next) => {
   try {
-    if (_ratesCache && _ratesCachedAt && Date.now() - _ratesCachedAt < RATES_TTL) {
+    const { rates, cachedAt, cached } = await getExchangeRates();
+    _ratesCache = rates;
+    _ratesCachedAt = cachedAt;
+
+    return res.status(200).json({
+      success: true,
+      data: rates,
+      updated_at: new Date(cachedAt).toISOString(),
+      cached,
+    });
+  } catch (err) {
+    // Serve stale cache if available
+    if (_ratesCache) {
       return res.status(200).json({
         success: true,
         data: _ratesCache,
@@ -213,32 +223,6 @@ const getRates = async (req, res, next) => {
         cached: true,
       });
     }
-
-    const response = await fetch("https://api.exchangerate-api.com/v4/latest/USD");
-    if (!response.ok) {
-      throw new Error(`Exchange rate API returned ${response.status}`);
-    }
-    const json = await response.json();
-    if (!json.rates || typeof json.rates !== "object") {
-      throw new Error("Exchange rate API returned unexpected format");
-    }
-
-    const filtered = {};
-    SUPPORTED_CURRENCIES.forEach((code) => {
-      if (json.rates[code] !== undefined) filtered[code] = json.rates[code];
-    });
-    filtered.USD = 1;
-
-    _ratesCache = filtered;
-    _ratesCachedAt = Date.now();
-
-    return res.status(200).json({
-      success: true,
-      data: _ratesCache,
-      updated_at: new Date(_ratesCachedAt).toISOString(),
-      cached: false,
-    });
-  } catch (err) {
     next(err);
   }
 };
