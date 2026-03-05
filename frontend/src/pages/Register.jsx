@@ -131,7 +131,7 @@ export default function Register() {
 
           {/* Google OAuth */}
           <a
-            href="http://localhost:3000/api/auth/google"
+            href={`${import.meta.env.VITE_API_URL || "http://localhost:3000/api"}/auth/google`}
             className="flex items-center justify-center gap-3 w-full border rounded-md px-4 py-2 text-sm font-medium hover:bg-muted/50 transition-colors"
           >
             <GoogleIcon />
