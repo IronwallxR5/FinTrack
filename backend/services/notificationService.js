@@ -39,6 +39,7 @@ async function checkBudgetAndNotify(userId, categoryId, _transactionCurrency) {
        FROM   transactions
        WHERE  user_id     = $1
          AND  category_id = $2
+         AND  type        = 'expense'
          AND  EXTRACT(YEAR  FROM date) = $3
          AND  EXTRACT(MONTH FROM date) = $4
        GROUP BY currency`,
@@ -99,7 +100,12 @@ async function checkBudgetAndNotify(userId, categoryId, _transactionCurrency) {
           [userId, budget.id, type, title, message, month, year]
         );
 
-        if (insertRes.rows.length === 0) continue;
+        if (insertRes.rows.length === 0) {
+          console.log(`[NotificationService] ${type} already sent for budget ${budget.id} in ${month}/${year}, skipping.`);
+          continue;
+        }
+
+        console.log(`[NotificationService] Inserted ${type} notification for budget ${budget.id} (${budget.category_name}), pct=${pct.toFixed(1)}%`);
 
         await sendEmail({
           to: email,
@@ -121,7 +127,8 @@ async function checkBudgetAndNotify(userId, categoryId, _transactionCurrency) {
           `,
         });
       } catch (err) {
-        console.error("[NotificationService]", err.message);
+        const detail = err?.response?.body ? JSON.stringify(err.response.body) : err.message;
+        console.error("[NotificationService] email/insert error:", detail);
       }
     }
   } catch (err) {

@@ -109,7 +109,12 @@ const createTransaction = async (req, res, next) => {
 
     const savedTx = result.rows[0];
 
-    checkBudgetAndNotify(userId, category_id || null, currency).catch(() => {});
+    // Only expense transactions can trigger budget alerts
+    if (txType === "expense" && category_id) {
+      checkBudgetAndNotify(userId, category_id, currency).catch((err) => {
+        console.error("[createTransaction] notification check failed:", err.message);
+      });
+    }
 
     return res.status(201).json({
       success: true,
@@ -336,10 +341,19 @@ const updateTransaction = async (req, res, next) => {
       params
     );
 
+    const updated = result.rows[0];
+
+    // Re-check budget thresholds after any edit that could affect spending
+    if (updated.type === "expense" && updated.category_id) {
+      checkBudgetAndNotify(updated.user_id, updated.category_id, updated.currency).catch((err) => {
+        console.error("[updateTransaction] notification check failed:", err.message);
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: "Transaction updated.",
-      data: result.rows[0],
+      data: updated,
     });
   } catch (err) {
     next(err);
