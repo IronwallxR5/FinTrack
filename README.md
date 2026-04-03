@@ -391,8 +391,8 @@ Managed through 11 sequential migration files, auto-applied on server startup vi
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/IronwallxR5/FJ-BE-R2-Padam-Rathi-NST-Pune.git
-cd FJ-BE-R2-Padam-Rathi-NST-Pune
+git clone https://github.com/IronwallxR5/FinTrack.git
+cd FinTrack
 
 # Backend
 cd backend
