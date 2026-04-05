@@ -1,4 +1,5 @@
-const pool = require("../config/db");
+const { Prisma } = require("@prisma/client");
+const prisma = require("../config/prisma");
 const { groq, GROQ_MODEL } = require("../config/groq");
 
 function notConfigured(res) {
@@ -16,68 +17,72 @@ async function buildFinancialContext(userId) {
   const year = now.getFullYear();
   const monthName = now.toLocaleString("default", { month: "long" });
 
-  const summaryRes = await pool.query(
-    `SELECT
-       currency,
-       SUM(CASE WHEN t.type = 'income'  THEN ABS(t.amount) ELSE 0 END) AS total_income,
-       SUM(CASE WHEN t.type = 'expense' THEN ABS(t.amount) ELSE 0 END) AS total_expenses
-     FROM transactions t
-     WHERE t.user_id = $1
-     GROUP BY t.currency`,
-    [userId]
+  // All-time summary
+  const summaryRows = await prisma.$queryRaw(
+    Prisma.sql`
+      SELECT
+        t.currency,
+        SUM(CASE WHEN t.type = 'income'  THEN ABS(t.amount) ELSE 0 END) AS total_income,
+        SUM(CASE WHEN t.type = 'expense' THEN ABS(t.amount) ELSE 0 END) AS total_expenses
+      FROM transactions t
+      WHERE t.user_id = ${userId}::uuid
+      GROUP BY t.currency
+    `
   );
 
-  const monthlyRes = await pool.query(
-    `SELECT
-       COALESCE(c.name, 'Uncategorized') AS category,
-       t.type,
-       t.currency,
-       SUM(ABS(t.amount)) AS total
-     FROM transactions t
-     LEFT JOIN categories c ON c.id = t.category_id
-     WHERE t.user_id = $1
-       AND EXTRACT(YEAR  FROM t.date) = $2
-       AND EXTRACT(MONTH FROM t.date) = $3
-     GROUP BY c.name, t.type, t.currency
-     ORDER BY total DESC
-     LIMIT 10`,
-    [userId, year, month]
+  // Monthly spending by category
+  const monthlyRows = await prisma.$queryRaw(
+    Prisma.sql`
+      SELECT
+        COALESCE(c.name, 'Uncategorized') AS category,
+        t.type,
+        t.currency,
+        SUM(ABS(t.amount)) AS total
+      FROM transactions t
+      LEFT JOIN categories c ON c.id = t.category_id
+      WHERE t.user_id = ${userId}::uuid
+        AND EXTRACT(YEAR  FROM t.date) = ${year}
+        AND EXTRACT(MONTH FROM t.date) = ${month}
+      GROUP BY c.name, t.type, t.currency
+      ORDER BY total DESC
+      LIMIT 10
+    `
   );
 
-  const recentRes = await pool.query(
-    `SELECT t.date, t.amount, t.description, t.currency,
-            COALESCE(c.name, 'Uncategorized') AS category, t.type AS category_type
-     FROM transactions t
-     LEFT JOIN categories c ON c.id = t.category_id
-     WHERE t.user_id = $1
-     ORDER BY t.date DESC, t.created_at DESC
-     LIMIT 10`,
-    [userId]
+  // Recent transactions (using Prisma Client — no raw SQL needed)
+  const recentTx = await prisma.transactions.findMany({
+    where: { user_id: userId },
+    include: { categories: { select: { name: true, type: true } } },
+    orderBy: [{ date: "desc" }, { created_at: "desc" }],
+    take: 10,
+  });
+
+  // Budget status this month
+  const budgetRows = await prisma.$queryRaw(
+    Prisma.sql`
+      SELECT
+        c.name AS category,
+        b.monthly_limit,
+        b.currency,
+        COALESCE(SUM(
+          CASE WHEN EXTRACT(YEAR  FROM t.date) = ${year}
+                AND EXTRACT(MONTH FROM t.date) = ${month}
+                AND t.currency = b.currency
+               THEN ABS(t.amount) ELSE 0 END
+        ), 0) AS spent
+      FROM budgets b
+      JOIN categories c ON c.id = b.category_id
+      LEFT JOIN transactions t ON t.category_id = b.category_id AND t.user_id = b.user_id
+      WHERE b.user_id = ${userId}::uuid
+      GROUP BY c.name, b.monthly_limit, b.currency
+    `
   );
 
-  const budgetRes = await pool.query(
-    `SELECT
-       c.name AS category,
-       b.monthly_limit,
-       b.currency,
-       COALESCE(SUM(
-         CASE WHEN EXTRACT(YEAR FROM t.date) = $2 AND EXTRACT(MONTH FROM t.date) = $3
-               AND t.currency = b.currency
-              THEN ABS(t.amount) ELSE 0 END
-       ), 0) AS spent
-     FROM budgets b
-     JOIN categories c ON c.id = b.category_id
-     LEFT JOIN transactions t ON t.category_id = b.category_id AND t.user_id = b.user_id
-     WHERE b.user_id = $1
-     GROUP BY c.name, b.monthly_limit, b.currency`,
-    [userId, year, month]
-  );
-
-  const userRes = await pool.query(
-    "SELECT name, preferred_currency FROM users WHERE id = $1",
-    [userId]
-  );
-  const user = userRes.rows[0];
+  // User info
+  const user = await prisma.users.findUnique({
+    where: { id: userId },
+    select: { name: true, preferred_currency: true },
+  });
 
   const lines = [
     `User: ${user.name || "Unknown"}, preferred currency: ${user.preferred_currency}`,
@@ -86,10 +91,10 @@ async function buildFinancialContext(userId) {
     "=== ALL-TIME FINANCIAL SUMMARY ===",
   ];
 
-  if (summaryRes.rows.length === 0) {
+  if (summaryRows.length === 0) {
     lines.push("No transactions recorded yet.");
   } else {
-    summaryRes.rows.forEach((r) => {
+    summaryRows.forEach((r) => {
       const net = parseFloat(r.total_income) - parseFloat(r.total_expenses);
       lines.push(
         `${r.currency}: Income ${parseFloat(r.total_income).toFixed(2)}, ` +
@@ -100,10 +105,10 @@ async function buildFinancialContext(userId) {
   }
 
   lines.push("", `=== ${monthName.toUpperCase()} ${year} SPENDING BY CATEGORY ===`);
-  if (monthlyRes.rows.length === 0) {
+  if (monthlyRows.length === 0) {
     lines.push("No transactions this month yet.");
   } else {
-    monthlyRes.rows.forEach((r) => {
+    monthlyRows.forEach((r) => {
       lines.push(
         `${r.category || "Uncategorized"} (${r.type}): ${r.currency} ${parseFloat(r.total).toFixed(2)}`
       );
@@ -111,13 +116,14 @@ async function buildFinancialContext(userId) {
   }
 
   lines.push("", "=== BUDGET STATUS THIS MONTH ===");
-  if (budgetRes.rows.length === 0) {
+  if (budgetRows.length === 0) {
     lines.push("No budgets set.");
   } else {
-    budgetRes.rows.forEach((r) => {
-      const pct = r.monthly_limit > 0
-        ? ((parseFloat(r.spent) / parseFloat(r.monthly_limit)) * 100).toFixed(1)
-        : 0;
+    budgetRows.forEach((r) => {
+      const pct =
+        r.monthly_limit > 0
+          ? ((parseFloat(r.spent) / parseFloat(r.monthly_limit)) * 100).toFixed(1)
+          : 0;
       const status = pct >= 100 ? "EXCEEDED" : pct >= 80 ? "WARNING" : "OK";
       lines.push(
         `${r.category}: ${r.currency} ${parseFloat(r.spent).toFixed(2)} / ${parseFloat(r.monthly_limit).toFixed(2)} (${pct}% — ${status})`
@@ -126,14 +132,17 @@ async function buildFinancialContext(userId) {
   }
 
   lines.push("", "=== RECENT TRANSACTIONS ===");
-  if (recentRes.rows.length === 0) {
+  if (recentTx.length === 0) {
     lines.push("None.");
   } else {
-    recentRes.rows.forEach((r) => {
+    recentTx.forEach((r) => {
+      const dateStr = r.date instanceof Date
+        ? r.date.toISOString().slice(0, 10)
+        : String(r.date).slice(0, 10);
+      const catType = r.categories?.type ?? r.type;
       lines.push(
-        `${r.date.toISOString?.().slice(0, 10) ?? String(r.date).slice(0, 10)} | ` +
-          `${r.category_type === "income" ? "+" : "-"}${r.currency} ${Math.abs(parseFloat(r.amount)).toFixed(2)} | ` +
-          `${r.category || "Uncategorized"} | ${r.description || "—"}`
+        `${dateStr} | ${catType === "income" ? "+" : "-"}${r.currency} ${Math.abs(parseFloat(r.amount)).toFixed(2)} | ` +
+          `${r.categories?.name || "Uncategorized"} | ${r.description || "—"}`
       );
     });
   }
@@ -208,12 +217,13 @@ const categorize = async (req, res, next) => {
       return res.status(400).json({ success: false, message: "description is required." });
     }
 
-    const catRes = await pool.query(
-      "SELECT id, name, type FROM categories WHERE user_id = $1 ORDER BY name",
-      [userId]
-    );
+    const categories = await prisma.categories.findMany({
+      where: { user_id: userId },
+      select: { id: true, name: true, type: true },
+      orderBy: { name: "asc" },
+    });
 
-    if (catRes.rows.length === 0) {
+    if (categories.length === 0) {
       return res.status(200).json({
         success: true,
         category_id: null,
@@ -223,7 +233,7 @@ const categorize = async (req, res, next) => {
       });
     }
 
-    const categoryList = catRes.rows
+    const categoryList = categories
       .map((c) => `${c.id} | ${c.name} (${c.type})`)
       .join("\n");
 
@@ -251,12 +261,12 @@ If no category is a reasonable match, use null for category_id and category_name
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
 
-    const validId = catRes.rows.find((c) => c.id === parsed.category_id);
+    const validId = categories.find((c) => c.id === parsed.category_id);
 
     return res.status(200).json({
       success: true,
       category_id:   validId ? parsed.category_id   : null,
-      category_name: validId ? parsed.category_name  : null,
+      category_name: validId ? parsed.category_name : null,
       confidence:    parsed.confidence || "low",
       reason:        parsed.reason     || "",
     });

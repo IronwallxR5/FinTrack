@@ -1,4 +1,5 @@
-const pool = require("../config/db");
+const { Prisma } = require("@prisma/client");
+const prisma = require("../config/prisma");
 const { sendEmail } = require("../config/email");
 const { getExchangeRates, convertCurrency } = require("./exchangeRates");
 
@@ -17,36 +18,36 @@ async function checkBudgetAndNotify(userId, categoryId, _transactionCurrency) {
   if (!categoryId) return;
 
   try {
-    const budgetRes = await pool.query(
-      `SELECT b.id, b.monthly_limit, b.currency, c.name AS category_name
-       FROM   budgets b
-       JOIN   categories c ON c.id = b.category_id
-       WHERE  b.user_id      = $1
-         AND  b.category_id  = $2`,
-      [userId, categoryId]
-    );
+    const budget = await prisma.budgets.findFirst({
+      where: { user_id: userId, category_id: categoryId },
+      include: { categories: { select: { name: true } } },
+      select: {
+        id: true,
+        monthly_limit: true,
+        currency: true,
+        categories: { select: { name: true } },
+      },
+    });
 
-    if (budgetRes.rows.length === 0) return;
-
-    const budget = budgetRes.rows[0];
+    if (!budget) return;
 
     const now = new Date();
     const month = now.getMonth() + 1;
     const year = now.getFullYear();
 
-    const spentRes = await pool.query(
-      `SELECT currency, COALESCE(SUM(ABS(amount)), 0) AS spent
-       FROM   transactions
-       WHERE  user_id     = $1
-         AND  category_id = $2
-         AND  type        = 'expense'
-         AND  EXTRACT(YEAR  FROM date) = $3
-         AND  EXTRACT(MONTH FROM date) = $4
-       GROUP BY currency`,
-      [userId, categoryId, year, month]
+    const spentRows = await prisma.$queryRaw(
+      Prisma.sql`
+        SELECT currency, COALESCE(SUM(ABS(amount)), 0) AS spent
+        FROM transactions
+        WHERE user_id     = ${userId}::uuid
+          AND category_id = ${categoryId}::uuid
+          AND type        = 'expense'
+          AND EXTRACT(YEAR  FROM date) = ${year}
+          AND EXTRACT(MONTH FROM date) = ${month}
+        GROUP BY currency
+      `
     );
 
-    // Convert all currencies to the budget's currency
     let rates = {};
     try {
       const ratesData = await getExchangeRates();
@@ -55,7 +56,7 @@ async function checkBudgetAndNotify(userId, categoryId, _transactionCurrency) {
       console.warn("[NotificationService] Could not fetch exchange rates:", err.message);
     }
 
-    const spent = spentRes.rows.reduce((sum, row) => {
+    const spent = spentRows.reduce((sum, row) => {
       return sum + convertCurrency(parseFloat(row.spent), row.currency, budget.currency, rates);
     }, 0);
 
@@ -68,44 +69,48 @@ async function checkBudgetAndNotify(userId, categoryId, _transactionCurrency) {
 
     if (thresholds.length === 0) return;
 
-    const userRes = await pool.query(
-      "SELECT email, name FROM users WHERE id = $1",
-      [userId]
-    );
-    if (userRes.rows.length === 0) return;
-    const { email, name } = userRes.rows[0];
+    const user = await prisma.users.findUnique({
+      where: { id: userId },
+      select: { email: true, name: true },
+    });
+    if (!user) return;
+
+    const { email, name } = user;
+    const categoryName = budget.categories?.name ?? "Unknown";
 
     for (const type of thresholds) {
       const isExceeded = type === "budget_exceeded";
 
       const title = isExceeded
-        ? `⚠️ Budget Exceeded — ${budget.category_name}`
-        : `🔔 Budget Warning — ${budget.category_name}`;
+        ? `⚠️ Budget Exceeded — ${categoryName}`
+        : `🔔 Budget Warning — ${categoryName}`;
 
       const message = isExceeded
-        ? `You have exceeded your ${budget.currency} ${limit.toFixed(2)} monthly budget for "${budget.category_name}". ` +
+        ? `You have exceeded your ${budget.currency} ${limit.toFixed(2)} monthly budget for "${categoryName}". ` +
           `Spent so far this month: ${budget.currency} ${spent.toFixed(2)} (${pct.toFixed(1)}%).`
-        : `You have used ${pct.toFixed(1)}% of your ${budget.currency} ${limit.toFixed(2)} monthly budget for "${budget.category_name}". ` +
+        : `You have used ${pct.toFixed(1)}% of your ${budget.currency} ${limit.toFixed(2)} monthly budget for "${categoryName}". ` +
           `Spent so far: ${budget.currency} ${spent.toFixed(2)}.`;
 
       try {
-        const insertRes = await pool.query(
-          `INSERT INTO notifications
-             (user_id, budget_id, type, title, message, month, year)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           ON CONFLICT (budget_id, type, month, year)
-             WHERE budget_id IS NOT NULL
-           DO NOTHING
-           RETURNING id`,
-          [userId, budget.id, type, title, message, month, year]
+        // Attempt INSERT; skip if duplicate (same budget+type+month+year)
+        const inserted = await prisma.$queryRaw(
+          Prisma.sql`
+            INSERT INTO notifications
+              (user_id, budget_id, type, title, message, month, year)
+            VALUES (${userId}::uuid, ${budget.id}::uuid, ${type}, ${title}, ${message}, ${month}, ${year})
+            ON CONFLICT (budget_id, type, month, year)
+              WHERE budget_id IS NOT NULL
+            DO NOTHING
+            RETURNING id
+          `
         );
 
-        if (insertRes.rows.length === 0) {
+        if (!inserted || inserted.length === 0) {
           console.log(`[NotificationService] ${type} already sent for budget ${budget.id} in ${month}/${year}, skipping.`);
           continue;
         }
 
-        console.log(`[NotificationService] Inserted ${type} notification for budget ${budget.id} (${budget.category_name}), pct=${pct.toFixed(1)}%`);
+        console.log(`[NotificationService] Inserted ${type} notification for budget ${budget.id} (${categoryName}), pct=${pct.toFixed(1)}%`);
 
         await sendEmail({
           to: email,
@@ -117,7 +122,7 @@ async function checkBudgetAndNotify(userId, categoryId, _transactionCurrency) {
               <p>Hi <strong>${name || "there"}</strong>,</p>
               <p>${message}</p>
               <div style="margin:24px 0;padding:16px;background:#f9fafb;border-radius:8px;border-left:4px solid ${isExceeded ? "#dc2626" : "#d97706"}">
-                <strong>${budget.category_name}</strong><br/>
+                <strong>${categoryName}</strong><br/>
                 Spent: ${budget.currency} ${spent.toFixed(2)} / ${budget.currency} ${limit.toFixed(2)}<br/>
                 <strong>${pct.toFixed(1)}% used</strong>
               </div>

@@ -1,4 +1,4 @@
-const pool = require("../config/db");
+const prisma = require("../config/prisma");
 const { isValidUUID, isValidDate } = require("../middlewares/validate");
 const { SUPPORTED_CURRENCIES } = require("../config/currencies");
 const { checkBudgetAndNotify } = require("../services/notificationService");
@@ -13,11 +13,11 @@ const createTransaction = async (req, res, next) => {
     let { category_id, amount, description, date, currency } = req.body;
 
     if (!currency) {
-      const userRow = await pool.query(
-        "SELECT preferred_currency FROM users WHERE id = $1",
-        [userId]
-      );
-      currency = userRow.rows[0]?.preferred_currency || "INR";
+      const userRow = await prisma.users.findUnique({
+        where: { id: userId },
+        select: { preferred_currency: true },
+      });
+      currency = userRow?.preferred_currency || "INR";
     }
     currency = currency.toUpperCase();
     if (!SUPPORTED_CURRENCIES.includes(currency)) {
@@ -74,40 +74,38 @@ const createTransaction = async (req, res, next) => {
         });
       }
 
-      const cat = await pool.query(
-        "SELECT id, type FROM categories WHERE id = $1 AND user_id = $2",
-        [category_id, userId]
-      );
+      const cat = await prisma.categories.findFirst({
+        where: { id: category_id, user_id: userId },
+        select: { id: true, type: true },
+      });
 
-      if (cat.rows.length === 0) {
+      if (!cat) {
         return res.status(404).json({
           success: false,
           message: "Category not found or does not belong to you.",
         });
       }
-      txType = cat.rows[0].type;
+      txType = cat.type;
     } else {
       if (!txType || !["income", "expense"].includes(txType)) {
         txType = "expense";
       }
     }
 
-    const result = await pool.query(
-      `INSERT INTO transactions (user_id, category_id, amount, description, date, currency, type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
-      [
-        userId,
-        category_id || null,
-        amount,
-        description || null,
-        date || new Date(),
-        currency,
-        txType,
-      ]
-    );
+    // Build date value
+    const txDate = date ? new Date(date) : new Date();
 
-    const savedTx = result.rows[0];
+    const savedTx = await prisma.transactions.create({
+      data: {
+        user_id: userId,
+        category_id: category_id || null,
+        amount,
+        description: description || null,
+        date: txDate,
+        currency,
+        type: txType,
+      },
+    });
 
     // Only expense transactions can trigger budget alerts
     if (txType === "expense" && category_id) {
@@ -151,51 +149,39 @@ const getTransactions = async (req, res, next) => {
     const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
     const offset = (safePage - 1) * safeLimit;
 
-    let query = `
-      SELECT t.*, c.name AS category_name, c.type AS category_type
-      FROM transactions t
-      LEFT JOIN categories c ON t.category_id = c.id
-      WHERE t.user_id = $1
-    `;
-    const params = [userId];
-    let idx = 2;
+    const where = { user_id: userId };
+    if (category_id) where.category_id = category_id;
+    if (type && ["income", "expense"].includes(type)) where.type = type;
+    if (from) where.date = { ...where.date, gte: new Date(from) };
+    if (to) where.date = { ...where.date, lte: new Date(to) };
+    if (currency) where.currency = currency.toUpperCase();
 
-    if (category_id) {
-      query += ` AND t.category_id = $${idx++}`;
-      params.push(category_id);
-    }
+    const transactions = await prisma.transactions.findMany({
+      where,
+      include: {
+        categories: {
+          select: { name: true, type: true },
+        },
+      },
+      orderBy: [{ date: "desc" }, { created_at: "desc" }],
+      skip: offset,
+      take: safeLimit,
+    });
 
-    if (type && ["income", "expense"].includes(type)) {
-      query += ` AND t.type = $${idx++}`;
-      params.push(type);
-    }
-
-    if (from) {
-      query += ` AND t.date >= $${idx++}`;
-      params.push(from);
-    }
-
-    if (to) {
-      query += ` AND t.date <= $${idx++}`;
-      params.push(to);
-    }
-
-    if (currency) {
-      query += ` AND t.currency = $${idx++}`;
-      params.push(currency.toUpperCase());
-    }
-
-    query += ` ORDER BY t.date DESC, t.created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
-    params.push(safeLimit, offset);
-
-    const result = await pool.query(query, params);
+    // Flatten category fields to match original response shape
+    const data = transactions.map((t) => ({
+      ...t,
+      category_name: t.categories?.name ?? null,
+      category_type: t.categories?.type ?? null,
+      categories: undefined,
+    }));
 
     return res.status(200).json({
       success: true,
-      count: result.rows.length,
+      count: data.length,
       page: safePage,
       limit: safeLimit,
-      data: result.rows,
+      data,
     });
   } catch (err) {
     next(err);
@@ -207,24 +193,32 @@ const getTransactionById = async (req, res, next) => {
     const userId = req.user.id;
     const { id } = req.params;
 
-    const result = await pool.query(
-      `SELECT t.*, c.name AS category_name, c.type AS category_type
-       FROM transactions t
-       LEFT JOIN categories c ON t.category_id = c.id
-       WHERE t.id = $1 AND t.user_id = $2`,
-      [id, userId]
-    );
+    const tx = await prisma.transactions.findFirst({
+      where: { id, user_id: userId },
+      include: {
+        categories: {
+          select: { name: true, type: true },
+        },
+      },
+    });
 
-    if (result.rows.length === 0) {
+    if (!tx) {
       return res.status(404).json({
         success: false,
         message: "Transaction not found.",
       });
     }
 
+    const data = {
+      ...tx,
+      category_name: tx.categories?.name ?? null,
+      category_type: tx.categories?.type ?? null,
+      categories: undefined,
+    };
+
     return res.status(200).json({
       success: true,
-      data: result.rows[0],
+      data,
     });
   } catch (err) {
     next(err);
@@ -237,49 +231,43 @@ const updateTransaction = async (req, res, next) => {
     const { id } = req.params;
     let { category_id, amount, description, date } = req.body;
 
-    const existing = await pool.query(
-      "SELECT id FROM transactions WHERE id = $1 AND user_id = $2",
-      [id, userId]
-    );
+    const existing = await prisma.transactions.findFirst({
+      where: { id, user_id: userId },
+    });
 
-    if (existing.rows.length === 0) {
+    if (!existing) {
       return res.status(404).json({
         success: false,
         message: "Transaction not found.",
       });
     }
 
-    const fields = [];
-    const params = [];
-    let idx = 1;
+    const data = {};
 
     if (category_id !== undefined) {
       if (category_id !== null) {
         if (!isValidUUID(category_id)) {
           return res.status(400).json({ success: false, message: "category_id must be a valid UUID." });
         }
-        const cat = await pool.query(
-          "SELECT id, type FROM categories WHERE id = $1 AND user_id = $2",
-          [category_id, userId]
-        );
-        if (cat.rows.length === 0) {
+        const cat = await prisma.categories.findFirst({
+          where: { id: category_id, user_id: userId },
+          select: { id: true, type: true },
+        });
+        if (!cat) {
           return res.status(404).json({
             success: false,
             message: "Category not found or does not belong to you.",
           });
         }
-        fields.push(`type = $${idx++}`);
-        params.push(cat.rows[0].type);
+        data.type = cat.type;
       }
-      fields.push(`category_id = $${idx++}`);
-      params.push(category_id);
+      data.category_id = category_id;
     }
 
     // Allow explicit type update (only when no category or clearing category)
     if (req.body.type !== undefined && category_id === undefined) {
       if (["income", "expense"].includes(req.body.type)) {
-        fields.push(`type = $${idx++}`);
-        params.push(req.body.type);
+        data.type = req.body.type;
       }
     }
 
@@ -294,8 +282,7 @@ const updateTransaction = async (req, res, next) => {
       if (Math.abs(amount) > 9999999999.99) {
         return res.status(400).json({ success: false, message: "Amount exceeds the maximum allowed value." });
       }
-      fields.push(`amount = $${idx++}`);
-      params.push(amount);
+      data.amount = amount;
     }
 
     if (req.body.currency !== undefined) {
@@ -303,45 +290,36 @@ const updateTransaction = async (req, res, next) => {
       if (!SUPPORTED_CURRENCIES.includes(newCurrency)) {
         return res.status(400).json({ success: false, message: `Unsupported currency. Supported: ${SUPPORTED_CURRENCIES.join(", ")}.` });
       }
-      fields.push(`currency = $${idx++}`);
-      params.push(newCurrency);
+      data.currency = newCurrency;
     }
 
     if (description !== undefined) {
       if (typeof description === "string" && description.length > 500) {
         return res.status(400).json({ success: false, message: "Description must not exceed 500 characters." });
       }
-      fields.push(`description = $${idx++}`);
-      params.push(description);
+      data.description = description;
     }
 
     if (date !== undefined) {
       if (!isValidDate(date)) {
         return res.status(400).json({ success: false, message: "Date must be in YYYY-MM-DD format." });
       }
-      fields.push(`date = $${idx++}`);
-      params.push(date);
+      data.date = new Date(date);
     }
 
-    if (fields.length === 0) {
+    if (Object.keys(data).length === 0) {
       return res.status(400).json({
         success: false,
         message: "No fields provided to update.",
       });
     }
 
-    fields.push(`updated_at = NOW()`);
+    data.updated_at = new Date();
 
-    params.push(id, userId);
-
-    const result = await pool.query(
-      `UPDATE transactions SET ${fields.join(", ")}
-       WHERE id = $${idx++} AND user_id = $${idx}
-       RETURNING *`,
-      params
-    );
-
-    const updated = result.rows[0];
+    const updated = await prisma.transactions.update({
+      where: { id },
+      data,
+    });
 
     // Re-check budget thresholds after any edit that could affect spending
     if (updated.type === "expense" && updated.category_id) {
@@ -365,17 +343,18 @@ const deleteTransaction = async (req, res, next) => {
     const userId = req.user.id;
     const { id } = req.params;
 
-    const result = await pool.query(
-      "DELETE FROM transactions WHERE id = $1 AND user_id = $2 RETURNING id",
-      [id, userId]
-    );
+    const existing = await prisma.transactions.findFirst({
+      where: { id, user_id: userId },
+    });
 
-    if (result.rows.length === 0) {
+    if (!existing) {
       return res.status(404).json({
         success: false,
         message: "Transaction not found.",
       });
     }
+
+    await prisma.transactions.delete({ where: { id } });
 
     return res.status(200).json({
       success: true,
@@ -387,38 +366,38 @@ const deleteTransaction = async (req, res, next) => {
 };
 
 const path = require("path");
-const fs   = require("fs");
+const fs = require("fs");
 
 const uploadReceipt = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { id }  = req.params;
+    const { id } = req.params;
 
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No file uploaded." });
     }
 
-    const txRes = await pool.query(
-      "SELECT id, receipt_url FROM transactions WHERE id = $1 AND user_id = $2",
-      [id, userId]
-    );
-    if (txRes.rows.length === 0) {
+    const tx = await prisma.transactions.findFirst({
+      where: { id, user_id: userId },
+      select: { id: true, receipt_url: true },
+    });
+
+    if (!tx) {
       fs.unlink(req.file.path, () => {});
       return res.status(404).json({ success: false, message: "Transaction not found." });
     }
 
-    const old = txRes.rows[0].receipt_url;
-    if (old) {
-      const oldPath = path.join(__dirname, "../", old.replace(/^\//, ""));
+    if (tx.receipt_url) {
+      const oldPath = path.join(__dirname, "../", tx.receipt_url.replace(/^\//, ""));
       fs.unlink(oldPath, () => {});
     }
 
     const receiptUrl = `/uploads/receipts/${req.file.filename}`;
 
-    await pool.query(
-      "UPDATE transactions SET receipt_url = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3",
-      [receiptUrl, id, userId]
-    );
+    await prisma.transactions.update({
+      where: { id },
+      data: { receipt_url: receiptUrl, updated_at: new Date() },
+    });
 
     return res.status(200).json({
       success: true,
@@ -434,28 +413,28 @@ const uploadReceipt = async (req, res, next) => {
 const deleteReceipt = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { id }  = req.params;
+    const { id } = req.params;
 
-    const txRes = await pool.query(
-      "SELECT receipt_url FROM transactions WHERE id = $1 AND user_id = $2",
-      [id, userId]
-    );
-    if (txRes.rows.length === 0) {
+    const tx = await prisma.transactions.findFirst({
+      where: { id, user_id: userId },
+      select: { id: true, receipt_url: true },
+    });
+
+    if (!tx) {
       return res.status(404).json({ success: false, message: "Transaction not found." });
     }
 
-    const receiptUrl = txRes.rows[0].receipt_url;
-    if (!receiptUrl) {
+    if (!tx.receipt_url) {
       return res.status(404).json({ success: false, message: "No receipt attached to this transaction." });
     }
 
-    const filePath = path.join(__dirname, "../", receiptUrl.replace(/^\//, ""));
+    const filePath = path.join(__dirname, "../", tx.receipt_url.replace(/^\//, ""));
     fs.unlink(filePath, () => {});
 
-    await pool.query(
-      "UPDATE transactions SET receipt_url = NULL, updated_at = NOW() WHERE id = $1 AND user_id = $2",
-      [id, userId]
-    );
+    await prisma.transactions.update({
+      where: { id },
+      data: { receipt_url: null, updated_at: new Date() },
+    });
 
     return res.status(200).json({ success: true, message: "Receipt deleted." });
   } catch (err) {

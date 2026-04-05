@@ -1,7 +1,8 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const pool = require("../config/db");
+const prisma = require("../config/prisma");
 const { isValidEmail } = require("../middlewares/validate");
+const { SUPPORTED_CURRENCIES } = require("../config/currencies");
 
 const SALT_ROUNDS = 10;
 
@@ -44,12 +45,14 @@ const register = async (req, res, next) => {
       });
     }
 
-    const existingUser = await pool.query(
-      "SELECT id FROM users WHERE email = $1",
-      [email.toLowerCase().trim()]
-    );
+    const normalizedEmail = email.toLowerCase().trim();
 
-    if (existingUser.rows.length > 0) {
+    const existingUser = await prisma.users.findUnique({
+      where: { email: normalizedEmail },
+      select: { id: true },
+    });
+
+    if (existingUser) {
       return res.status(409).json({
         success: false,
         message: "Email is already registered.",
@@ -58,14 +61,20 @@ const register = async (req, res, next) => {
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
-    const result = await pool.query(
-      `INSERT INTO users (email, password_hash, name)
-       VALUES ($1, $2, $3)
-       RETURNING id, email, name, preferred_currency, created_at`,
-      [email.toLowerCase().trim(), passwordHash, name || null]
-    );
-
-    const user = result.rows[0];
+    const user = await prisma.users.create({
+      data: {
+        email: normalizedEmail,
+        password_hash: passwordHash,
+        name: name || null,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        preferred_currency: true,
+        created_at: true,
+      },
+    });
 
     const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
       expiresIn: process.env.JWT_EXPIRES_IN || "7d",
@@ -108,19 +117,24 @@ const login = async (req, res, next) => {
       });
     }
 
-    const result = await pool.query(
-      "SELECT id, email, name, preferred_currency, password_hash, created_at FROM users WHERE email = $1",
-      [email.toLowerCase().trim()]
-    );
+    const user = await prisma.users.findUnique({
+      where: { email: email.toLowerCase().trim() },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        preferred_currency: true,
+        password_hash: true,
+        created_at: true,
+      },
+    });
 
-    if (result.rows.length === 0) {
+    if (!user) {
       return res.status(404).json({
         success: false,
         message: "No account found with this email. Please sign up first.",
       });
     }
-
-    const user = result.rows[0];
 
     const isMatch = await bcrypt.compare(password, user.password_hash);
 
@@ -154,23 +168,28 @@ const login = async (req, res, next) => {
   }
 };
 
-
 const getProfile = async (req, res, next) => {
   try {
     const userId = req.user.id;
 
-    const result = await pool.query(
-      "SELECT id, email, name, preferred_currency, created_at FROM users WHERE id = $1",
-      [userId]
-    );
+    const user = await prisma.users.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        preferred_currency: true,
+        created_at: true,
+      },
+    });
 
-    if (result.rows.length === 0) {
+    if (!user) {
       return res.status(404).json({ success: false, message: "User not found." });
     }
 
     return res.status(200).json({
       success: true,
-      data: result.rows[0],
+      data: user,
     });
   } catch (err) {
     next(err);
@@ -189,16 +208,13 @@ const updateProfile = async (req, res, next) => {
       });
     }
 
-    const fields = [];
-    const params = [];
-    let idx = 1;
+    const data = {};
 
     if (name !== undefined) {
       if (name.length > 100) {
         return res.status(400).json({ success: false, message: "Name must not exceed 100 characters." });
       }
-      fields.push(`name = $${idx++}`);
-      params.push(name.trim());
+      data.name = name.trim();
     }
 
     if (password) {
@@ -208,32 +224,36 @@ const updateProfile = async (req, res, next) => {
           message: "Password must be between 6 and 128 characters.",
         });
       }
-      const hash = await bcrypt.hash(password, SALT_ROUNDS);
-      fields.push(`password_hash = $${idx++}`);
-      params.push(hash);
+      data.password_hash = await bcrypt.hash(password, SALT_ROUNDS);
     }
 
     if (preferred_currency) {
-      const { SUPPORTED_CURRENCIES } = require("../config/currencies");
       const code = preferred_currency.toUpperCase();
       if (!SUPPORTED_CURRENCIES.includes(code)) {
-        return res.status(400).json({ success: false, message: `Unsupported currency. Supported: ${SUPPORTED_CURRENCIES.join(", ")}.` });
+        return res.status(400).json({
+          success: false,
+          message: `Unsupported currency. Supported: ${SUPPORTED_CURRENCIES.join(", ")}.`,
+        });
       }
-      fields.push(`preferred_currency = $${idx++}`);
-      params.push(code);
+      data.preferred_currency = code;
     }
 
-    params.push(userId);
-
-    const result = await pool.query(
-      `UPDATE users SET ${fields.join(", ")} WHERE id = $${idx} RETURNING id, email, name, preferred_currency, created_at`,
-      params
-    );
+    const updated = await prisma.users.update({
+      where: { id: userId },
+      data,
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        preferred_currency: true,
+        created_at: true,
+      },
+    });
 
     return res.status(200).json({
       success: true,
       message: "Profile updated.",
-      data: result.rows[0],
+      data: updated,
     });
   } catch (err) {
     next(err);

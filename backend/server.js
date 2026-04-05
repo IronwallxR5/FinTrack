@@ -4,7 +4,7 @@ const session = require("express-session");
 const path = require("path");
 require("dotenv").config();
 
-const runMigrations = require("./config/migrate");
+const prisma = require("./config/prisma");
 const passport = require("./config/passport");
 const authRoutes = require("./routes/authRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
@@ -57,10 +57,22 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 3000;
 
 const startServer = async () => {
-  await runMigrations();
   app.listen(PORT, () => {
     console.log(`Server is running on PORT ${PORT}`);
   });
 };
 
-startServer();
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});
+
+// Graceful shutdown
+const shutdown = async (signal) => {
+  console.log(`\n${signal} received — shutting down gracefully`);
+  await prisma.$disconnect();
+  process.exit(0);
+};
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT",  () => shutdown("SIGINT"));

@@ -1,4 +1,4 @@
-const pool = require("../config/db");
+const prisma = require("../config/prisma");
 
 const createCategory = async (req, res, next) => {
   try {
@@ -26,20 +26,22 @@ const createCategory = async (req, res, next) => {
       });
     }
 
-    const result = await pool.query(
-      `INSERT INTO categories (user_id, name, type)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [userId, name.trim(), type]
-    );
+    const category = await prisma.categories.create({
+      data: {
+        user_id: userId,
+        name: name.trim(),
+        type,
+      },
+    });
 
     return res.status(201).json({
       success: true,
       message: "Category created.",
-      data: result.rows[0],
+      data: category,
     });
   } catch (err) {
-    if (err.code === "23505") {
+    // P2002 = unique constraint violation
+    if (err.code === "P2002") {
       return res.status(409).json({
         success: false,
         message: "A category with this name and type already exists.",
@@ -52,23 +54,21 @@ const createCategory = async (req, res, next) => {
 const getCategories = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { type } = req.query; 
+    const { type } = req.query;
 
-    let query = "SELECT * FROM categories WHERE user_id = $1";
-    const params = [userId];
-
+    const where = { user_id: userId };
     if (type && ["income", "expense"].includes(type)) {
-      query += " AND type = $2";
-      params.push(type);
+      where.type = type;
     }
 
-    query += " ORDER BY created_at DESC";
-
-    const result = await pool.query(query, params);
+    const categories = await prisma.categories.findMany({
+      where,
+      orderBy: { created_at: "desc" },
+    });
 
     return res.status(200).json({
       success: true,
-      data: result.rows,
+      data: categories,
     });
   } catch (err) {
     next(err);
@@ -80,12 +80,11 @@ const getCategoryById = async (req, res, next) => {
     const userId = req.user.id;
     const { id } = req.params;
 
-    const result = await pool.query(
-      "SELECT * FROM categories WHERE id = $1 AND user_id = $2",
-      [id, userId]
-    );
+    const category = await prisma.categories.findFirst({
+      where: { id, user_id: userId },
+    });
 
-    if (result.rows.length === 0) {
+    if (!category) {
       return res.status(404).json({
         success: false,
         message: "Category not found.",
@@ -94,7 +93,7 @@ const getCategoryById = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      data: result.rows[0],
+      data: category,
     });
   } catch (err) {
     next(err);
@@ -128,42 +127,33 @@ const updateCategory = async (req, res, next) => {
       });
     }
 
-    const fields = [];
-    const params = [];
-    let idx = 1;
-
-    if (name) {
-      fields.push(`name = $${idx++}`);
-      params.push(name.trim());
-    }
-    if (type) {
-      fields.push(`type = $${idx++}`);
-      params.push(type);
-    }
-
-    params.push(id, userId);
-
-    const result = await pool.query(
-      `UPDATE categories SET ${fields.join(", ")}
-       WHERE id = $${idx++} AND user_id = $${idx}
-       RETURNING *`,
-      params
-    );
-
-    if (result.rows.length === 0) {
+    // Check ownership
+    const existing = await prisma.categories.findFirst({
+      where: { id, user_id: userId },
+    });
+    if (!existing) {
       return res.status(404).json({
         success: false,
         message: "Category not found.",
       });
     }
 
+    const data = {};
+    if (name) data.name = name.trim();
+    if (type) data.type = type;
+
+    const updated = await prisma.categories.update({
+      where: { id },
+      data,
+    });
+
     return res.status(200).json({
       success: true,
       message: "Category updated.",
-      data: result.rows[0],
+      data: updated,
     });
   } catch (err) {
-    if (err.code === "23505") {
+    if (err.code === "P2002") {
       return res.status(409).json({
         success: false,
         message: "A category with this name and type already exists.",
@@ -178,29 +168,30 @@ const deleteCategory = async (req, res, next) => {
     const userId = req.user.id;
     const { id } = req.params;
 
-    const cat = await pool.query(
-      "SELECT id FROM categories WHERE id = $1 AND user_id = $2",
-      [id, userId]
-    );
+    const category = await prisma.categories.findFirst({
+      where: { id, user_id: userId },
+    });
 
-    if (cat.rows.length === 0) {
+    if (!category) {
       return res.status(404).json({
         success: false,
         message: "Category not found.",
       });
     }
 
-    await pool.query(
-      "UPDATE transactions SET category_id = NULL WHERE category_id = $1",
-      [id]
-    );
+    // Nullify foreign key on related transactions before deleting
+    await prisma.transactions.updateMany({
+      where: { category_id: id },
+      data: { category_id: null },
+    });
 
-    await pool.query("DELETE FROM categories WHERE id = $1", [id]);
+    await prisma.categories.delete({
+      where: { id },
+    });
 
     return res.status(200).json({
       success: true,
-      message:
-        "Category deleted. Linked transactions have been moved to uncategorized.",
+      message: "Category deleted. Linked transactions have been moved to uncategorized.",
     });
   } catch (err) {
     next(err);
@@ -213,4 +204,4 @@ module.exports = {
   getCategoryById,
   updateCategory,
   deleteCategory,
-};      
+};

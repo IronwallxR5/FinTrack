@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model budgets {
+  id            String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id       String          @db.Uuid
+  category_id   String          @db.Uuid
+  monthly_limit Decimal         @db.Decimal(12, 2)
+  created_at    DateTime?       @default(now()) @db.Timestamp(6)
+  updated_at    DateTime?       @default(now()) @db.Timestamp(6)
+  currency      String          @default("INR") @db.VarChar(3)
+  categories    categories      @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users         users           @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  notifications notifications[]
+
+  @@unique([user_id, category_id], map: "idx_budgets_user_category")
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model categories {
+  id           String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id      String         @db.Uuid
+  name         String         @db.VarChar(100)
+  type         category_type
+  created_at   DateTime?      @default(now()) @db.Timestamp(6)
+  budgets      budgets[]
+  users        users          @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  transactions transactions[]
+}
+
+model notifications {
+  id         String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id    String    @db.Uuid
+  budget_id  String?   @db.Uuid
+  type       String    @db.VarChar(50)
+  title      String    @db.VarChar(255)
+  message    String
+  is_read    Boolean   @default(false)
+  month      Int
+  year       Int
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  budgets    budgets?  @relation(fields: [budget_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id, is_read, created_at(sort: Desc)], map: "idx_notifications_user_unread")
+}
+
+model transactions {
+  id          String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id     String      @db.Uuid
+  category_id String?     @db.Uuid
+  amount      Decimal     @db.Decimal(12, 2)
+  description String?     @db.VarChar(500)
+  date        DateTime    @default(dbgenerated("CURRENT_DATE")) @db.Date
+  created_at  DateTime?   @default(now()) @db.Timestamp(6)
+  updated_at  DateTime?   @default(now()) @db.Timestamp(6)
+  currency    String      @default("INR") @db.VarChar(3)
+  receipt_url String?     @db.VarChar(500)
+  type        String      @default("expense") @db.VarChar(7)
+  categories  categories? @relation(fields: [category_id], references: [id], onUpdate: NoAction)
+  users       users       @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id, date(sort: Desc)], map: "idx_transactions_user_date")
+}
+
+model users {
+  id                 String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  email              String          @unique @db.VarChar(255)
+  password_hash      String?         @db.VarChar(255)
+  created_at         DateTime?       @default(now()) @db.Timestamp(6)
+  name               String?         @db.VarChar(100)
+  google_id          String?         @unique @db.VarChar(255)
+  preferred_currency String          @default("INR") @db.VarChar(3)
+  budgets            budgets[]
+  categories         categories[]
+  notifications      notifications[]
+  transactions       transactions[]
+}
+
+enum category_type {
+  income
+  expense
+}
