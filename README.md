@@ -33,25 +33,26 @@ A full-stack personal finance management application with multi-currency support
 
 ### Budget Monitoring & Alerts
 - **Monthly Budgets** — Set spending limits per expense category with real-time progress tracking
-- **Cross-Currency Budget Aggregation** — Budget in INR tracks USD/EUR/GBP expenses too, auto-converted via live exchange rates
+- **Cross-Currency Budget Aggregation** — A budget set in INR also tracks USD/EUR/GBP expenses in the same category, auto-converted via live exchange rates
 - **Smart Notifications** — Automatic alerts at 80% (warning) and 100% (exceeded) thresholds
 - **Email Alerts** — SendGrid-powered email notifications when budget thresholds are crossed
-- **In-App Notification Centre** — Bell icon with unread badge, mark-as-read, and bulk actions
+- **In-App Notification Centre** — Bell icon with unread badge, mark-as-read, and bulk clear actions
 
 ### AI-Powered Intelligence
 - **Financial Advisor Chat** — Multi-turn conversational AI (Groq `llama-3.3-70b-versatile`) that knows your real financial data — balances, budgets, spending patterns — and gives personalised advice
 - **Auto-Categorisation** — ✨ Sparkle button on transactions uses AI to match descriptions to your category list automatically
 
 ### Authentication & Security
-- **JWT Authentication** — Stateless token-based auth with secure `httpOnly` patterns
+- **JWT Authentication** — Stateless token-based auth with secure `Authorization: Bearer` header patterns
 - **Google OAuth 2.0** — One-click Google sign-in via Passport.js
-- **Protected Routes** — All finance endpoints require valid tokens; frontend redirects unauthenticated users
+- **Protected Routes** — All finance endpoints require valid tokens; the frontend redirects unauthenticated users automatically
 
 ### Dashboard & Visualisation
-- **Financial Summary** — Total income, expenses, and net savings cards with currency conversion
-- **Monthly Trends Chart** — Bar chart (Recharts) showing income vs expenses over time
-- **Budget Progress Bars** — Visual indicators with colour-coded status (green/amber/red)
-- **Currency Switcher** — View all data in any supported currency instantly
+- **Financial Summary Cards** — Total income, expenses, and net savings with live currency conversion
+- **Monthly Trends Chart** — Bar chart (Recharts) showing income vs expenses across the last 12 months
+- **Budget Progress Bars** — Visual indicators with colour-coded status (green / amber / red) on the dashboard
+- **Budget Detail Page** — Dedicated budgets page showing per-category spending limits and progress, independent of the global summary
+- **Currency Switcher** — View all dashboard data in any of the 10 supported currencies instantly
 
 ---
 
@@ -63,7 +64,7 @@ A full-stack personal finance management application with multi-currency support
 |---|---|
 | **Node.js 20** + **Express 5** | REST API server — Express 5's native async error propagation eliminates manual `try/catch` boilerplate |
 | **PostgreSQL** (Neon) | Relational database — foreign keys enforce data integrity across users → categories → transactions → budgets |
-| **pg (node-postgres)** | Raw SQL queries — full control over JOINs and aggregations without ORM overhead |
+| **Prisma ORM 6** | Type-safe database client — schema-driven models, auto-generated queries, and graceful connection pool management |
 | **JWT (jsonwebtoken)** | Stateless authentication — self-verifying tokens, no server-side session store needed |
 | **Passport.js** | Google OAuth 2.0 strategy — clean adapter pattern for social login |
 | **SendGrid** | Transactional email — budget breach notifications delivered reliably |
@@ -94,7 +95,7 @@ A full-stack personal finance management application with multi-currency support
 │                                                                 │
 │  ┌──────────┐ ┌────────────┐ ┌──────────┐ ┌─────────────────┐   │
 │  │  Auth    │ │ Dashboard  │ │Budgets & │ │  AI Advisor     │   │
-│  │  Pages   │ │ + Charts   │ │Notifs    │ │  + AutoCat      │   │
+│  │  Pages   │ │ + Charts   │ │ Notifs   │ │  + AutoCat      │   │
 │  └────┬─────┘ └─────┬──────┘ └────┬─────┘ └───────┬─────────┘   │
 │       │             │             │               │             │
 │       └──────┬──────┴──────┬──────┘               │             │
@@ -130,22 +131,23 @@ A full-stack personal finance management application with multi-currency support
 │       │         │    │ (email) │  │  (AI chat +   │             │
 │       │         │    └─────────┘  │   categorise) │             │
 │       │         │                 └───────────────┘             │
-└───────┼─────────┼──────────────────────────────────────────────-┘
+└───────┼─────────┼─────────────────────────────────────────────-─┘
         │         │
         ▼         ▼
 ┌─────────────────────────────────────────┐
 │         PostgreSQL (Neon)               │
+│    accessed via Prisma ORM              │
 │                                         │
 │  users · categories · transactions      │
-│  budgets · notifications · _migrations  │
+│  budgets · notifications                │
 └─────────────────────────────────────────┘
 ```
 
 **Data Flow:**
 1. User interacts with React frontend → Axios sends request with JWT in `Authorization` header
 2. Express middleware verifies JWT → extracts `req.user.id`
-3. Controller executes raw SQL against PostgreSQL via `pg` Pool
-4. For expense transactions: `notificationService` asynchronously checks budget thresholds, converts cross-currency spending via `exchangeRates` service, and triggers SendGrid email + in-app notification if 80%/100% breached
+3. Controller executes queries against PostgreSQL via the **Prisma client**
+4. For expense transactions: `notificationService` asynchronously checks budget thresholds, converts cross-currency spending via the `exchangeRates` service, and triggers SendGrid email + in-app notification if 80%/100% is breached
 5. AI endpoints inject the user's real financial context into the Groq system prompt for personalised responses
 
 ---
@@ -153,16 +155,17 @@ A full-stack personal finance management application with multi-currency support
 ## 📁 Project Structure
 
 ```
-FJ-BE-R2-Padam-Rathi-NST-Pune/
+FinTrack/
 │
 ├── backend/
 │   ├── config/
 │   │   ├── currencies.js          # Supported currency codes
-│   │   ├── db.js                  # pg Pool singleton (Neon connection)
+│   │   ├── db.js                  # Legacy pg Pool (kept for compatibility)
 │   │   ├── email.js               # SendGrid wrapper (graceful fallback if no key)
 │   │   ├── groq.js                # Groq client singleton (null if key absent)
 │   │   ├── migrate.js             # Auto-runs pending SQL migrations on startup
 │   │   ├── passport.js            # Google OAuth 2.0 strategy
+│   │   ├── prisma.js              # Prisma client singleton
 │   │   └── upload.js              # Multer disk storage + MIME whitelist
 │   │
 │   ├── controllers/
@@ -179,18 +182,9 @@ FJ-BE-R2-Padam-Rathi-NST-Pune/
 │   │   ├── errorHandler.js        # Global Express error handler
 │   │   └── validate.js            # UUID + date format validators
 │   │
-│   ├── migrations/                # Sequential SQL files (auto-applied)
-│   │   ├── 001_create_users_table.sql
-│   │   ├── 002_create_categories_table.sql
-│   │   ├── 003_create_transactions_table.sql
-│   │   ├── 004_create_budgets_table.sql
-│   │   ├── 005_add_user_profile_fields.sql
-│   │   ├── 006_add_google_id.sql
-│   │   ├── 007_add_currency_support.sql
-│   │   ├── 008_add_budget_currency.sql
-│   │   ├── 009_create_notifications_table.sql
-│   │   ├── 010_add_receipt_url.sql
-│   │   └── 011_add_transaction_type.sql
+│   ├── prisma/
+│   │   └── schema.prisma          # Prisma data model (users, categories,
+│   │                              #   transactions, budgets, notifications)
 │   │
 │   ├── routes/                    # Express Router files (1:1 with controllers)
 │   │   ├── aiRoutes.js
@@ -230,9 +224,9 @@ FJ-BE-R2-Padam-Rathi-NST-Pune/
         │
         ├── pages/
         │   ├── AIAdvisor.jsx          # Multi-turn AI chat interface
-        │   ├── Budgets.jsx            # Budget CRUD + overall monthly summary
+        │   ├── Budgets.jsx            # Budget CRUD + per-category progress bars
         │   ├── Categories.jsx         # Category management
-        │   ├── Dashboard.jsx          # Financial overview + charts
+        │   ├── Dashboard.jsx          # Financial overview + charts + budget summary
         │   ├── Login.jsx              # Email/password + Google OAuth
         │   ├── Notifications.jsx      # In-app notification centre
         │   ├── OAuthCallback.jsx      # Google OAuth token handler
@@ -248,7 +242,7 @@ FJ-BE-R2-Padam-Rathi-NST-Pune/
 
 ## 🗄 Database Schema
 
-Managed through 11 sequential migration files, auto-applied on server startup via a `_migrations` tracking table.
+Managed via **Prisma ORM** with the schema defined in `backend/prisma/schema.prisma`. Prisma handles query building and connection pool management against a Neon-hosted PostgreSQL instance.
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -382,7 +376,7 @@ Managed through 11 sequential migration files, auto-applied on server startup vi
 
 ### Prerequisites
 
-- **Node.js** ≥ 20.19 (or ≥ 22.12)
+- **Node.js** ≥ 20.19 (or ≥ 22.12) — required by Vite 7
 - **PostgreSQL** — [Neon](https://neon.tech) free tier recommended
 - **Groq API Key** — Free at [console.groq.com](https://console.groq.com)
 - **SendGrid API Key** *(optional)* — Free at [sendgrid.com](https://sendgrid.com) for email notifications
@@ -405,16 +399,25 @@ cp .env.example .env    # Set VITE_API_URL=http://localhost:3000/api
 npm install
 ```
 
-### 2. Start Backend
+### 2. Generate Prisma Client
+
+```bash
+cd backend
+npx prisma generate
+```
+
+> This step is required before starting the server for the first time. It generates the type-safe Prisma client from `prisma/schema.prisma`.
+
+### 3. Start Backend
 
 ```bash
 cd backend
 npm run dev
 # ✅ Server starts on http://localhost:3000
-# ✅ Migrations run automatically on first boot
+# ✅ Prisma connects to your Neon PostgreSQL database
 ```
 
-### 3. Start Frontend
+### 4. Start Frontend
 
 ```bash
 cd frontend
@@ -422,7 +425,7 @@ npm run dev
 # ✅ Vite dev server starts on http://localhost:5173
 ```
 
-### 4. Open the App
+### 5. Open the App
 
 Navigate to **[http://localhost:5173](http://localhost:5173)** and register a new account.
 
@@ -465,7 +468,7 @@ GROQ_MODEL=llama-3.3-70b-versatile
 VITE_API_URL=http://localhost:3000/api
 ```
 
-> **Note:** Both Google OAuth and SendGrid are optional. The app works fully without them — Google login button won't appear, and budget alerts log to the console instead of sending emails.
+> **Note:** Both Google OAuth and SendGrid are optional. The app works fully without them — the Google login button won't appear, and budget alerts fall back to console logging instead of sending emails.
 
 ---
 
@@ -473,7 +476,7 @@ VITE_API_URL=http://localhost:3000/api
 
 | Service | Component | Configuration |
 |---------|-----------|---------------|
-| **Render** | Backend | Root Directory: `backend/`, Build: `npm install`, Start: `node server.js` |
+| **Render** | Backend | Root Directory: `backend/`, Build: `npm install && npx prisma generate`, Start: `node server.js` |
 | **Vercel** | Frontend | Root Directory: `frontend/`, Framework: Vite, Output: `dist/` |
 | **Neon** | Database | Serverless PostgreSQL with connection pooling |
 
@@ -489,60 +492,65 @@ VITE_API_URL=http://localhost:3000/api
 
 ## 🎯 Key Design Decisions
 
-### 1. Migration-First Schema Management
-Rather than using an ORM with auto-sync, all schema changes are explicit numbered SQL files. A `migrate.js` runner tracks applied migrations in a `_migrations` table, ensuring the schema evolves predictably across all environments (local, staging, production).
+### 1. Prisma ORM for Database Access
+All database interactions use **Prisma Client 6**, generated from a single `schema.prisma` file. This gives type-safe queries, automatic connection pool management, and a single source of truth for the data model. The schema is maintained in `backend/prisma/schema.prisma`.
 
-### 2. Raw SQL Over ORM
-Using `pg` directly gives full control over query optimisation. The budget aggregation query, for example, uses `json_agg` with a subquery to collect per-currency spending, then converts server-side — something that would be awkward to express in Sequelize or Prisma.
+### 2. Server-Side Cross-Currency Budget Aggregation
+Budget spending is converted to the budget's currency on the backend using a shared exchange rate cache (`exchangeRates.js`, 1-hour TTL). This ensures the API response is immediately usable and consistent — the frontend doesn't need to re-aggregate. The budget page displays only per-category spending progress; the global income/expense summary lives exclusively on the Dashboard.
 
-### 3. Server-Side Cross-Currency Budget Aggregation
-Budget spending is converted to the budget's currency on the backend using a shared exchange rate cache (`exchangeRates.js`, 1-hour TTL). This ensures the API response is immediately usable and consistent — the frontend doesn't need to re-aggregate.
-
-### 4. Fire-and-Forget Notifications
+### 3. Fire-and-Forget Notifications
 Budget breach detection runs asynchronously after transaction creation. A failed SendGrid call never surfaces as a transaction error — it's logged server-side only. This keeps transaction creation latency unaffected by email delivery.
 
-### 5. AI Graceful Degradation
+### 4. AI Graceful Degradation
 The Groq client initialises as `null` when `GROQ_API_KEY` is absent. Every AI endpoint checks for `null` first and returns `503` with a human-readable message. The rest of the app works fully without an AI key.
 
-### 6. Fallback Exchange Rates
-The frontend pre-seeds `FALLBACK_RATES` for all 10 currencies so the UI renders valid numbers immediately, even before the external rate API responds or if it's offline.
+### 5. Fallback Exchange Rates on the Frontend
+The frontend pre-seeds `FALLBACK_RATES` for all 10 currencies so the dashboard renders valid numbers immediately, even before the external rate API responds or if it's temporarily offline.
 
-### 7. Notification Deduplication
-The `notifications` table has a `UNIQUE(budget_id, type, month, year)` constraint with `ON CONFLICT DO NOTHING`. This means each budget can trigger at most one warning and one exceeded alert per month — no spam.
+### 6. Notification Deduplication
+The `notifications` table has a `UNIQUE(budget_id, type, month, year)` constraint. This means each budget can trigger at most one warning and one exceeded alert per calendar month — no duplicate notifications.
+
+### 7. Separation of Concerns: Dashboard vs Budgets
+The **Dashboard** is the home for global financial summaries (total income, total expenses, net savings) and the monthly trend chart. The **Budgets** page focuses exclusively on per-category spending limits and progress bars. This avoids redundancy and keeps each page purposeful.
 
 ---
 
 ## 🧩 Challenges & Solutions
 
 ### 1. Cross-Currency Budget Tracking
-**Problem:** A budget set in INR was ignoring USD or EUR transactions in the same category — the SQL had `AND t.currency = b.currency` which filtered them out entirely.
+**Problem:** A budget set in INR was ignoring USD or EUR transactions in the same category — the original query had `AND t.currency = b.currency` which filtered them out entirely.
 
-**Solution:** Rewrote the budget queries to collect spending per currency using `json_agg`, then created a shared `exchangeRates.js` service that caches live rates for 1 hour. The `budgetController` and `notificationService` both convert all per-currency spending into the budget's currency before calculating percentages.
+**Solution:** Rewrote the budget queries to collect spending per currency using `json_agg`, then created a shared `exchangeRates.js` service that caches live rates for 1 hour. Both `budgetController` and `notificationService` convert all per-currency spending into the budget's currency before calculating percentages.
 
 ### 2. Uncategorised Transactions Invisible on Dashboard
 **Problem:** Dashboard queries used `INNER JOIN categories` and filtered on `c.type` — uncategorised transactions (where `category_id` is NULL) had no category row, so they vanished from summaries entirely.
 
-**Solution:** Switched to `LEFT JOIN` and added a `type` column directly on the `transactions` table (migration 011). All queries now use `t.type` instead of `c.type`. Uncategorised transactions show as "Uncategorized" in the breakdown.
+**Solution:** Switched to `LEFT JOIN` and added a `type` column directly on the `transactions` table. All queries now use `t.type` instead of `c.type`. Uncategorised transactions appear as "Uncategorized" in the breakdown.
 
 ### 3. Notification System Not Triggering
-**Problem:** Multiple issues — `createTransaction` silenced all notification errors with `.catch(() => {})`, `updateTransaction` never called `checkBudgetAndNotify` at all, and the spending query didn't filter by `type = 'expense'` (income was inflating budget spending).
+**Problem:** Multiple issues — `createTransaction` silenced all notification errors with `.catch(() => {})`, `updateTransaction` never called `checkBudgetAndNotify` at all, and the spending query didn't filter by `type = 'expense'` (income was inflating budget spending figures).
 
-**Solution:** Added proper error logging, added notification checks to `updateTransaction`, filtered spending to expense-only, and added diagnostic `console.log` statements for debugging threshold crossings.
+**Solution:** Added proper error logging, added notification checks to `updateTransaction`, filtered spending to expense-only, and added diagnostic `console.log` statements for tracing threshold crossings.
 
 ### 4. Groq JSON Output Inconsistency
 **Problem:** The `categorize` endpoint expected pure JSON from Groq, but the model occasionally wrapped output in markdown code blocks, causing `JSON.parse()` to throw.
 
 **Solution:** Added regex extraction (`raw.match(/\{[\s\S]*\}/)`) before parsing, dropped temperature to `0.1` for deterministic output, and added a graceful fallback returning `{ category_id: null, confidence: "low" }` instead of a 500 error.
 
-### 5. Express Session + CORS Cookie Issues
-**Problem:** Google OAuth required sessions for the OAuth handshake, but cross-origin cookies between Vercel (frontend) and Render (backend) were being blocked.
+### 5. Express Session + CORS Cookie Issues with Google OAuth
+**Problem:** Google OAuth required sessions for the handshake, but cross-origin cookies between Vercel (frontend) and Render (backend) were being blocked by the browser.
 
 **Solution:** Configured Express sessions with `cookie: { secure: true, sameSite: "none" }` for production, set `trust proxy`, and ensured CORS allowed credentials from the exact frontend origin (no wildcards).
+
+### 6. Migrating from Raw SQL to Prisma ORM
+**Problem:** The codebase originally used the `pg` library for raw SQL queries. Migrating to Prisma required replacing all manual SQL strings with type-safe Prisma client methods while preserving the existing business logic, especially complex aggregation queries for budgets and dashboard summaries.
+
+**Solution:** Migrated all controllers to use `prisma.*` model methods. The Prisma schema was introspected from the existing PostgreSQL database using `prisma db pull`, ensuring the models matched the production schema exactly. A singleton `prisma.js` config handles client instantiation and graceful `$disconnect()` on `SIGTERM`/`SIGINT`.
 
 ---
 
 ## 👤 Author
 
-**Padam Rathi**  
+**Padam Rathi**
 
 ---
