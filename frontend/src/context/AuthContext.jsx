@@ -49,7 +49,7 @@ export function AuthProvider({ children }) {
     localStorage.setItem("token", token);
     setToken(token);
     try {
-      const res = await api.get("/auth/profile");
+      const res = await api.get("/auth/me");
       const u = res.data.data;
       localStorage.setItem("user", JSON.stringify(u));
       setUser(u);

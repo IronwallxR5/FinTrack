@@ -33,7 +33,7 @@ export default function Profile() {
   useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const res = await api.get("/auth/profile");
+        const res = await api.get("/auth/me");
         setProfile(res.data.data);
         setName(res.data.data.name || "");
         setPreferredCurrency(res.data.data.preferred_currency || "INR");
@@ -51,7 +51,7 @@ export default function Profile() {
     setMessage("");
     setSaving(true);
     try {
-      const res = await api.put("/auth/profile", { name });
+      const res = await api.put("/auth/me", { name });
       setProfile(res.data.data);
       updateUser({ ...user, name: res.data.data.name });
       setMessage("Profile updated successfully!");
@@ -73,7 +73,7 @@ export default function Profile() {
 
     setPwSaving(true);
     try {
-      await api.put("/auth/profile", { password: newPassword });
+      await api.put("/auth/me", { password: newPassword });
       setPwMsg("Password changed successfully!");
       setNewPassword("");
       setConfirmPassword("");
@@ -89,7 +89,7 @@ export default function Profile() {
     setCurrencyMsg("");
     setCurrencySaving(true);
     try {
-      const res = await api.put("/auth/profile", { preferred_currency: preferredCurrency });
+      const res = await api.put("/auth/me", { preferred_currency: preferredCurrency });
       setProfile(res.data.data);
       updateUser({ ...user, preferred_currency: res.data.data.preferred_currency });
       setCurrencyMsg("Preferred currency updated!");

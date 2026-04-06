@@ -9,8 +9,8 @@ const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 
 router.post("/register", register);
 router.post("/login", login);
-router.get("/profile", authMiddleware, getProfile);
-router.put("/profile", authMiddleware, updateProfile);
+router.get("/me", authMiddleware, getProfile);
+router.put("/me", authMiddleware, updateProfile);
 
 
 router.get("/google",
