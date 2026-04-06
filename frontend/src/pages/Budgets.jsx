@@ -18,40 +18,15 @@ export default function Budgets() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ category_id: "", monthly_limit: "", currency: user?.preferred_currency || "INR" });
-  const [overallSummary, setOverallSummary] = useState(null);
 
   const fetchData = async () => {
     try {
-      const now = new Date();
-      const preferredCurrency = user?.preferred_currency || "INR";
-      const [budgetRes, catRes, summaryRes, ratesRes] = await Promise.all([
+      const [budgetRes, catRes] = await Promise.all([
         api.get("/budgets"),
         api.get("/categories?type=expense"),
-        api.get("/dashboard/summary", {
-          params: { year: now.getFullYear(), month: now.getMonth() + 1 },
-        }),
-        api.get("/dashboard/rates"),
       ]);
       setBudgets(budgetRes.data.data);
       setCategories(catRes.data.data);
-
-      // Aggregate multi-currency summary into preferred currency
-      const rates = ratesRes.data.rates || {};
-      const rows = summaryRes.data.data || [];
-      let totalIncome = 0;
-      let totalExpenses = 0;
-      rows.forEach((r) => {
-        const fromRate = rates[r.currency] || 1;
-        const toRate = rates[preferredCurrency] || 1;
-        const factor = toRate / fromRate;
-        totalIncome += r.total_income * factor;
-        totalExpenses += r.total_expenses * factor;
-      });
-      setOverallSummary({
-        total_income: totalIncome,
-        total_expenses: totalExpenses,
-        net_savings: totalIncome - totalExpenses,
-      });
     } catch (err) {
       console.error(err);
     } finally {
@@ -124,36 +99,6 @@ export default function Budgets() {
           <Plus className="h-4 w-4 mr-2" /> Set Budget
         </Button>
       </div>
-
-      {/* Overall Monthly Summary */}
-      {overallSummary && (
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Card>
-            <CardContent className="py-5 text-center">
-              <p className="text-sm text-muted-foreground">Total Income</p>
-              <p className="text-2xl font-bold text-emerald-600">
-                +{formatAmount(overallSummary.total_income, user?.preferred_currency || "INR")}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="py-5 text-center">
-              <p className="text-sm text-muted-foreground">Total Expenses</p>
-              <p className="text-2xl font-bold text-red-600">
-                -{formatAmount(overallSummary.total_expenses, user?.preferred_currency || "INR")}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="py-5 text-center">
-              <p className="text-sm text-muted-foreground">Net Savings</p>
-              <p className={`text-2xl font-bold ${overallSummary.net_savings >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                {formatAmount(overallSummary.net_savings, user?.preferred_currency || "INR")}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
 
       {/* Form */}
       {showForm && (
@@ -240,8 +185,8 @@ export default function Budgets() {
                         b.status === "exceeded"
                           ? "destructive"
                           : b.status === "warning"
-                          ? "warning"
-                          : "success"
+                            ? "warning"
+                            : "success"
                       }
                     >
                       {b.status === "exceeded" ? "Over budget" : b.status === "warning" ? "Warning" : "On track"}
@@ -262,13 +207,12 @@ export default function Budgets() {
 
                 <div className="h-3 rounded-full bg-muted overflow-hidden">
                   <div
-                    className={`h-full rounded-full transition-all duration-500 ${
-                      b.status === "exceeded"
+                    className={`h-full rounded-full transition-all duration-500 ${b.status === "exceeded"
                         ? "bg-red-500"
                         : b.status === "warning"
-                        ? "bg-amber-500"
-                        : "bg-emerald-500"
-                    }`}
+                          ? "bg-amber-500"
+                          : "bg-emerald-500"
+                      }`}
                     style={{ width: `${Math.min(b.percentage_used, 100)}%` }}
                   />
                 </div>
