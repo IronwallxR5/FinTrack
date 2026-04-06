@@ -20,7 +20,6 @@ async function checkBudgetAndNotify(userId, categoryId, _transactionCurrency) {
   try {
     const budget = await prisma.budgets.findFirst({
       where: { user_id: userId, category_id: categoryId },
-      include: { categories: { select: { name: true } } },
       select: {
         id: true,
         monthly_limit: true,

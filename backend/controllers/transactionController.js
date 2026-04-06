@@ -1,3 +1,5 @@
+const path = require("path");
+const fs = require("fs");
 const prisma = require("../config/prisma");
 const { isValidUUID, isValidDate } = require("../middlewares/validate");
 const { SUPPORTED_CURRENCIES } = require("../config/currencies");
@@ -364,9 +366,6 @@ const deleteTransaction = async (req, res, next) => {
     next(err);
   }
 };
-
-const path = require("path");
-const fs = require("fs");
 
 const uploadReceipt = async (req, res, next) => {
   try {

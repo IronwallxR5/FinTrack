@@ -18,10 +18,13 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401 || err.response?.status === 404) {
+    if (err.response?.status === 401) {
       const url = err.config?.url || "";
-      const isAuthRoute = url.includes("/auth/login") || url.includes("/auth/register") || url.includes("/auth/profile");
-      if (!isAuthRoute && err.response?.status === 401) {
+      const isAuthRoute =
+        url.includes("/auth/login") ||
+        url.includes("/auth/register") ||
+        url.includes("/auth/me");
+      if (!isAuthRoute) {
         localStorage.removeItem("token");
         localStorage.removeItem("user");
         window.location.href = "/login";

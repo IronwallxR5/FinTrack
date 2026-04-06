@@ -166,15 +166,9 @@ const getCategoryBreakdown = async (req, res, next) => {
   }
 };
 
-let _ratesCache = null;
-let _ratesCachedAt = null;
-
 const getRates = async (req, res, next) => {
   try {
     const { rates, cachedAt, cached } = await getExchangeRates();
-    _ratesCache = rates;
-    _ratesCachedAt = cachedAt;
-
     return res.status(200).json({
       success: true,
       data: rates,
@@ -182,14 +176,6 @@ const getRates = async (req, res, next) => {
       cached,
     });
   } catch (err) {
-    if (_ratesCache) {
-      return res.status(200).json({
-        success: true,
-        data: _ratesCache,
-        updated_at: new Date(_ratesCachedAt).toISOString(),
-        cached: true,
-      });
-    }
     next(err);
   }
 };
