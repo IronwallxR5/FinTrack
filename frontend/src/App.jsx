@@ -11,6 +11,7 @@ import Profile from "@/pages/Profile";
 import Notifications from "@/pages/Notifications";
 import AIAdvisor from "@/pages/AIAdvisor";
 import OAuthCallback from "@/pages/OAuthCallback";
+import Goals from "@/pages/Goals";
 
 function ProtectedRoute({ children }) {
   const { token, loading } = useAuth();
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="/transactions"    element={<Transactions />} />
           <Route path="/categories"      element={<Categories />} />
           <Route path="/budgets"         element={<Budgets />} />
+          <Route path="/goals"           element={<Goals />} />
           <Route path="/notifications"   element={<Notifications />} />
           <Route path="/ai-advisor"       element={<AIAdvisor />} />
           <Route path="/profile"         element={<Profile />} />

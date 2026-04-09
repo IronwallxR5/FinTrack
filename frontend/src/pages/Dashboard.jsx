@@ -5,7 +5,8 @@ import { CURRENCIES, formatAmount } from "@/lib/currencies";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
-import { ArrowUpRight, ArrowDownRight, Wallet } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, Wallet, Target, TrendingUp, CheckCircle2, AlertTriangle, Clock } from "lucide-react";
+import { Link } from "react-router-dom";
 import {
   BarChart,
   Bar,
@@ -55,6 +56,7 @@ export default function Dashboard() {
   const [rawSummary, setRawSummary] = useState([]);
   const [rawMonthly, setRawMonthly] = useState([]);
   const [budgets, setBudgets] = useState([]);
+  const [goals,   setGoals]   = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -64,14 +66,16 @@ export default function Dashboard() {
 
     const fetchData = async () => {
       try {
-        const [sumRes, reportRes, budgetRes] = await Promise.all([
+        const [sumRes, reportRes, budgetRes, goalRes] = await Promise.all([
           api.get("/dashboard/summary"),
           api.get("/dashboard/monthly-report"),
           api.get("/budgets"),
+          api.get("/goals"),
         ]);
         setRawSummary(Array.isArray(sumRes.data.data) ? sumRes.data.data : []);
         setRawMonthly(reportRes.data.data || []);
         setBudgets(budgetRes.data.data || []);
+        setGoals(goalRes.data.data || []);
       } catch (err) {
         console.error("Dashboard data fetch error:", err);
       } finally {
@@ -264,6 +268,63 @@ export default function Dashboard() {
                 </div>
               </div>
             ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Savings Goals */}
+      {goals.length > 0 && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Target className="h-5 w-5 text-indigo-600" />
+              Savings Goals
+            </CardTitle>
+            <Link to="/goals" className="text-xs text-indigo-600 hover:underline font-medium">
+              View all →
+            </Link>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {goals.slice(0, 3).map((g) => {
+              const barColour =
+                g.status === "completed" ? "bg-emerald-500" :
+                g.status === "overdue"   ? "bg-red-500"     : "bg-indigo-500";
+              const StatusIcon =
+                g.status === "completed" ? CheckCircle2 :
+                g.status === "overdue"   ? AlertTriangle  : Clock;
+              const iconColour =
+                g.status === "completed" ? "text-emerald-600" :
+                g.status === "overdue"   ? "text-red-600"     : "text-indigo-600";
+
+              return (
+                <div key={g.id} className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-1.5 font-medium">
+                      <StatusIcon className={`h-3.5 w-3.5 ${iconColour}`} />
+                      <span className="truncate max-w-[180px]">{g.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-muted-foreground text-xs">
+                        {formatAmount(g.current_amount, g.currency)} / {formatAmount(g.target_amount, g.currency)}
+                      </span>
+                      <Badge variant="outline" className="text-xs">{g.completion_pct}%</Badge>
+                    </div>
+                  </div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${barColour}`}
+                      style={{ width: `${Math.min(g.completion_pct, 100)}%` }}
+                    />
+                  </div>
+                  {g.status === "active" && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      <TrendingUp className="h-3 w-3 text-indigo-500" />
+                      {formatAmount(g.required_monthly_savings, g.currency)}/mo needed · {g.days_remaining} days left
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}

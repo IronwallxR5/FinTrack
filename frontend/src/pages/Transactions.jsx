@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, X, Paperclip, ExternalLink, FileText, Sparkles } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Paperclip, ExternalLink, FileText, Sparkles, Target, PlusCircle, MinusCircle } from "lucide-react";
 
 // Construct backend origin from the API base URL (strip /api suffix)
 const BACKEND_ORIGIN = (import.meta.env.VITE_API_URL || "http://localhost:3000/api").replace(/\/api$/, "");
@@ -26,6 +26,7 @@ export default function Transactions() {
   const [filterCurrency, setFilterCurrency] = useState("");
   const [uploadingId, setUploadingId] = useState(null); // txId currently being uploaded
   const [suggestingCategory, setSuggestingCategory] = useState(false);
+  const [goals, setGoals] = useState([]);
   const fileInputRef = useRef(null);
   const pendingTxId  = useRef(null); // which tx the hidden file input is targeting
   const [form, setForm] = useState({
@@ -36,18 +37,22 @@ export default function Transactions() {
     currency: defaultCurrency,
     type: "expense",
   });
+  // Goal allocations: [{ goal_id, mode: "pct"|"amount", value }]
+  const [goalAllocations, setGoalAllocations] = useState([]);
 
   const fetchData = async () => {
     try {
       const params = {};
       if (filterType) params.type = filterType;
       if (filterCurrency) params.currency = filterCurrency;
-      const [txRes, catRes] = await Promise.all([
+      const [txRes, catRes, goalRes] = await Promise.all([
         api.get("/transactions", { params }),
         api.get("/categories"),
+        api.get("/goals"),
       ]);
       setTransactions(txRes.data.data);
       setCategories(catRes.data.data);
+      setGoals(goalRes.data.data || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -61,6 +66,7 @@ export default function Transactions() {
 
   const resetForm = () => {
     setForm({ category_id: "", amount: "", description: "", date: new Date().toISOString().split("T")[0], currency: defaultCurrency, type: "expense" });
+    setGoalAllocations([]);
     setEditingId(null);
     setShowForm(false);
   };
@@ -73,6 +79,16 @@ export default function Transactions() {
         category_id: form.category_id || null,
         amount: parseFloat(form.amount),
       };
+      // Attach goal allocations only for income transactions
+      if (form.type === "income" && goalAllocations.length > 0) {
+        payload.goal_allocations = goalAllocations
+          .filter((a) => a.goal_id && a.value)
+          .map((a) =>
+            a.mode === "pct"
+              ? { goal_id: a.goal_id, allocation_pct: parseFloat(a.value) }
+              : { goal_id: a.goal_id, allocated_amount: parseFloat(a.value) }
+          );
+      }
       if (editingId) {
         await api.put(`/transactions/${editingId}`, payload);
       } else {
@@ -319,11 +335,108 @@ export default function Transactions() {
                   required
                 />
               </div>
+
+              {/* Goal Allocations — income only */}
+              {form.type === "income" && (
+                <div className="sm:col-span-2 space-y-3 border rounded-lg p-4 bg-muted/30">
+                  <div className="flex items-center justify-between">
+                    <Label className="flex items-center gap-1.5 text-sm font-medium">
+                      <Target className="h-4 w-4 text-indigo-600" />
+                      Allocate to Goals <span className="text-muted-foreground font-normal">(optional)</span>
+                    </Label>
+                    <Button
+                      type="button" variant="outline" size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setGoalAllocations((prev) => [...prev, { goal_id: "", mode: "pct", value: "" }])}
+                    >
+                      <PlusCircle className="h-3 w-3 mr-1" /> Add Goal
+                    </Button>
+                  </div>
+
+                  {goalAllocations.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No goal allocations. Click "Add Goal" to split this income into a savings goal.</p>
+                  )}
+
+                  {goalAllocations.map((alloc, i) => {
+                    // Running total for visual feedback
+                    const totalPct = goalAllocations.reduce((sum, a) => {
+                      if (a.mode === "pct") return sum + (parseFloat(a.value) || 0);
+                      if (a.mode === "amount" && parseFloat(form.amount) > 0)
+                        return sum + ((parseFloat(a.value) || 0) / parseFloat(form.amount)) * 100;
+                      return sum;
+                    }, 0);
+                    const overLimit = totalPct > 100;
+
+                    return (
+                      <div key={i} className="flex items-center gap-2 flex-wrap">
+                        {/* Goal picker */}
+                        <Select
+                          value={alloc.goal_id}
+                          onChange={(e) => setGoalAllocations((prev) => prev.map((a, j) => j === i ? { ...a, goal_id: e.target.value } : a))}
+                          className="flex-1 min-w-[160px] text-sm"
+                        >
+                          <option value="">Select goal…</option>
+                          {goals.filter((g) => g.status !== "completed").map((g) => (
+                            <option key={g.id} value={g.id}>{g.name} ({g.currency})</option>
+                          ))}
+                        </Select>
+
+                        {/* Mode toggle */}
+                        <Select
+                          value={alloc.mode}
+                          onChange={(e) => setGoalAllocations((prev) => prev.map((a, j) => j === i ? { ...a, mode: e.target.value, value: "" } : a))}
+                          className="w-24 text-sm"
+                        >
+                          <option value="pct">%</option>
+                          <option value="amount">Amount</option>
+                        </Select>
+
+                        {/* Value */}
+                        <Input
+                          type="number"
+                          step={alloc.mode === "pct" ? "0.01" : "0.01"}
+                          min="0.01"
+                          max={alloc.mode === "pct" ? "100" : undefined}
+                          placeholder={alloc.mode === "pct" ? "e.g. 20" : "e.g. 5000"}
+                          value={alloc.value}
+                          onChange={(e) => setGoalAllocations((prev) => prev.map((a, j) => j === i ? { ...a, value: e.target.value } : a))}
+                          className={`w-28 text-sm ${overLimit ? "border-red-400" : ""}`}
+                        />
+
+                        <Button
+                          type="button" variant="ghost" size="icon"
+                          onClick={() => setGoalAllocations((prev) => prev.filter((_, j) => j !== i))}
+                        >
+                          <MinusCircle className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+
+                  {/* Running total indicator */}
+                  {goalAllocations.length > 0 && (() => {
+                    const totalPct = goalAllocations.reduce((sum, a) => {
+                      if (a.mode === "pct") return sum + (parseFloat(a.value) || 0);
+                      if (a.mode === "amount" && parseFloat(form.amount) > 0)
+                        return sum + ((parseFloat(a.value) || 0) / parseFloat(form.amount)) * 100;
+                      return sum;
+                    }, 0);
+                    const over = totalPct > 100;
+                    return (
+                      <p className={`text-xs font-medium ${over ? "text-red-500" : "text-muted-foreground"}`}>
+                        Total allocated: {totalPct.toFixed(1)}%{over ? " — exceeds 100%! Reduce allocation before submitting." : ""}
+                      </p>
+                    );
+                  })()}
+                </div>
+              )}
+
               <div className="sm:col-span-2">
                 <Button type="submit" className="w-full sm:w-auto">
                   {editingId ? "Update" : "Create"} Transaction
                 </Button>
               </div>
+
             </form>
           </CardContent>
         </Card>
