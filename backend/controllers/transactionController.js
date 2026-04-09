@@ -4,6 +4,7 @@ const prisma = require("../config/prisma");
 const { isValidUUID, isValidDate } = require("../middlewares/validate");
 const { SUPPORTED_CURRENCIES } = require("../config/currencies");
 const { checkBudgetAndNotify } = require("../services/notificationService");
+const { resolveAllocations } = require("../services/goalAllocationService");
 
 const normaliseAmount = (amount) => {
   return parseFloat(Number(amount).toFixed(2));
@@ -97,16 +98,37 @@ const createTransaction = async (req, res, next) => {
     // Build date value
     const txDate = date ? new Date(date) : new Date();
 
-    const savedTx = await prisma.transactions.create({
-      data: {
-        user_id: userId,
-        category_id: category_id || null,
-        amount,
-        description: description || null,
-        date: txDate,
-        currency,
-        type: txType,
-      },
+    // ── Goal allocations (income only) ─────────────────────────────────────
+    let allocations = [];
+    if (txType === "income" && Array.isArray(req.body.goal_allocations) && req.body.goal_allocations.length > 0) {
+      try {
+        allocations = await resolveAllocations(req.body.goal_allocations, amount, currency, userId);
+      } catch (e) {
+        return res.status(e.status || 400).json({ success: false, message: e.message });
+      }
+    } else if (req.body.goal_allocations?.length && txType !== "income") {
+      return res.status(400).json({ success: false, message: "goal_allocations can only be set on income transactions." });
+    }
+
+    // Atomic: create transaction + insert all allocation rows together
+    const savedTx = await prisma.$transaction(async (tx) => {
+      const created = await tx.transactions.create({
+        data: {
+          user_id:     userId,
+          category_id: category_id || null,
+          amount,
+          description: description || null,
+          date:        txDate,
+          currency,
+          type:        txType,
+        },
+      });
+      for (const a of allocations) {
+        await tx.transaction_goal_allocations.create({
+          data: { transaction_id: created.id, ...a },
+        });
+      }
+      return created;
     });
 
     // Only expense transactions can trigger budget alerts
@@ -309,7 +331,7 @@ const updateTransaction = async (req, res, next) => {
       data.date = new Date(date);
     }
 
-    if (Object.keys(data).length === 0) {
+    if (Object.keys(data).length === 0 && req.body.goal_allocations === undefined) {
       return res.status(400).json({
         success: false,
         message: "No fields provided to update.",
@@ -318,9 +340,59 @@ const updateTransaction = async (req, res, next) => {
 
     data.updated_at = new Date();
 
-    const updated = await prisma.transactions.update({
-      where: { id },
-      data,
+    // ── Goal allocation wipe + re-insert (income transactions only) ────────
+    // Effective values after this edit (fall back to existing if not changed)
+    const effectiveType     = data.type     ?? existing.type;
+    const effectiveAmount   = data.amount   != null ? Number(data.amount)   : Number(existing.amount);
+    const effectiveCurrency = data.currency ?? existing.currency;
+
+    let newAllocations = null;  // null = "don't touch join table"
+
+    if (effectiveType === "income") {
+      const incomingAllocs = req.body.goal_allocations;
+
+      if (incomingAllocs !== undefined) {
+        // Caller explicitly sent a new goal_allocations array (incl. empty [])
+        try {
+          newAllocations = await resolveAllocations(incomingAllocs, effectiveAmount, effectiveCurrency, userId);
+        } catch (e) {
+          return res.status(e.status || 400).json({ success: false, message: e.message });
+        }
+      } else if (data.amount != null || data.currency != null) {
+        // Amount or currency changed — re-compute existing allocations at new values
+        const existingAllocs = await prisma.transaction_goal_allocations.findMany({
+          where:  { transaction_id: id },
+          select: { goal_id: true, allocation_pct: true },
+        });
+        if (existingAllocs.length > 0) {
+          try {
+            newAllocations = await resolveAllocations(
+              existingAllocs.map((a) => ({ goal_id: a.goal_id, allocation_pct: Number(a.allocation_pct) })),
+              effectiveAmount,
+              effectiveCurrency,
+              userId
+            );
+          } catch (e) {
+            return res.status(e.status || 400).json({ success: false, message: e.message });
+          }
+        }
+      }
+    } else if (req.body.goal_allocations?.length) {
+      return res.status(400).json({ success: false, message: "goal_allocations can only be set on income transactions." });
+    }
+
+    // Atomic: update transaction + replace allocation rows if needed
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.transactions.update({ where: { id }, data });
+      if (newAllocations !== null) {
+        await tx.transaction_goal_allocations.deleteMany({ where: { transaction_id: id } });
+        for (const a of newAllocations) {
+          await tx.transaction_goal_allocations.create({
+            data: { transaction_id: id, ...a },
+          });
+        }
+      }
+      return result;
     });
 
     // Re-check budget thresholds after any edit that could affect spending

@@ -13,7 +13,8 @@ const dashboardRoutes = require("./routes/dashboardRoutes");
 const budgetRoutes = require("./routes/budgetRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const aiRoutes = require("./routes/aiRoutes");
-const errorHandler = require("./middlewares/errorHandler");
+const goalRoutes         = require("./routes/goalRoutes");
+const errorHandler       = require("./middlewares/errorHandler");
 
 const app = express();
 
@@ -49,7 +50,8 @@ app.use("/api/transactions", transactionRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/budgets", budgetRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/ai", aiRoutes);
+app.use("/api/ai",           aiRoutes);
+app.use("/api/goals",        goalRoutes);
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 app.use(errorHandler);
