@@ -5,6 +5,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:pull": "prisma db pull",
     "test": "echo \"Error: no test specified\" && exit 1"

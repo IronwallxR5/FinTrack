@@ -45,18 +45,23 @@ export default function Transactions() {
       const params = {};
       if (filterType) params.type = filterType;
       if (filterCurrency) params.currency = filterCurrency;
-      const [txRes, catRes, goalRes] = await Promise.all([
+      const [txRes, catRes] = await Promise.all([
         api.get("/transactions", { params }),
         api.get("/categories"),
-        api.get("/goals"),
       ]);
       setTransactions(txRes.data.data);
       setCategories(catRes.data.data);
-      setGoals(goalRes.data.data || []);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+    // Goals are optional — fetch independently so a failure never breaks the tx list
+    try {
+      const goalRes = await api.get("/goals");
+      setGoals(goalRes.data.data || []);
+    } catch (err) {
+      console.warn("Goals fetch skipped:", err.message);
     }
   };
 

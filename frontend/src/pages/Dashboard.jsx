@@ -66,20 +66,25 @@ export default function Dashboard() {
 
     const fetchData = async () => {
       try {
-        const [sumRes, reportRes, budgetRes, goalRes] = await Promise.all([
+        const [sumRes, reportRes, budgetRes] = await Promise.all([
           api.get("/dashboard/summary"),
           api.get("/dashboard/monthly-report"),
           api.get("/budgets"),
-          api.get("/goals"),
         ]);
         setRawSummary(Array.isArray(sumRes.data.data) ? sumRes.data.data : []);
         setRawMonthly(reportRes.data.data || []);
         setBudgets(budgetRes.data.data || []);
-        setGoals(goalRes.data.data || []);
       } catch (err) {
         console.error("Dashboard data fetch error:", err);
       } finally {
         setLoading(false);
+      }
+      // Goals are optional — never block the dashboard if this fails
+      try {
+        const goalRes = await api.get("/goals");
+        setGoals(goalRes.data.data || []);
+      } catch (err) {
+        console.warn("Goals fetch skipped:", err.message);
       }
     };
 
