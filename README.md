@@ -1,6 +1,6 @@
 # FinTrack — Personal Finance Tracker
 
-A full-stack personal finance management application with multi-currency support, AI-powered insights, budget monitoring with email alerts, and receipt management.
+A full-stack personal finance management application with multi-currency support, AI-powered insights, budget monitoring with email alerts, savings goals tracking, and receipt management.
 
 **Live Demo:** [Frontend (Vercel)](https://fj-be-r2-padam-rathi-nst-pune.vercel.app) · [Backend API (Render)](https://fj-be-r2-padam-rathi-nst-pune.onrender.com)
 
@@ -31,6 +31,15 @@ A full-stack personal finance management application with multi-currency support
 - **Multi-Currency Support** — 10 currencies (USD, INR, EUR, GBP, JPY, CHF, HKD, SGD, AED, KWD) with live exchange rate conversion
 - **Receipt Uploads** — Attach JPEG, PNG, WEBP, GIF, or PDF receipts (≤ 5 MB) to any transaction
 
+### Savings Goals (Sinking Funds)
+- **Goal Creation** — Set a target name, amount, currency, and deadline for any savings target (e.g. "New Laptop", "Trip to Goa")
+- **Income Allocation** — When logging income, split any percentage or flat amount across multiple savings goals in a single transaction — each allocation is routed through the live FX service if goal and transaction currencies differ
+- **Dynamic Progress Tracking** — Goal balances are computed on-the-fly from the `transaction_goal_allocations` join table — no stale `current_amount` column that can drift
+- **Radial Progress Rings** — SVG-animated rings show completion percentage per goal with colour-coded status (active / overdue / completed)
+- **Monthly Savings Rate** — Each active goal displays the required monthly contribution to hit the deadline
+- **Data Integrity on Edit/Delete** — Editing a transaction's amount or currency automatically re-computes all its allocations atomically; deleting a transaction cascades and removes its allocations via database-level `ON DELETE CASCADE`
+- **Dashboard Widget** — Top 3 active goals shown on the main dashboard with progress bars and a "View all →" link
+
 ### Budget Monitoring & Alerts
 - **Monthly Budgets** — Set spending limits per expense category with real-time progress tracking
 - **Cross-Currency Budget Aggregation** — A budget set in INR also tracks USD/EUR/GBP expenses in the same category, auto-converted via live exchange rates
@@ -51,7 +60,7 @@ A full-stack personal finance management application with multi-currency support
 - **Financial Summary Cards** — Total income, expenses, and net savings with live currency conversion
 - **Monthly Trends Chart** — Bar chart (Recharts) showing income vs expenses across the last 12 months
 - **Budget Progress Bars** — Visual indicators with colour-coded status (green / amber / red) on the dashboard
-- **Budget Detail Page** — Dedicated budgets page showing per-category spending limits and progress, independent of the global summary
+- **Savings Goals Widget** — Top goals with progress bars and monthly savings rates, rendered directly on the dashboard
 - **Currency Switcher** — View all dashboard data in any of the 10 supported currencies instantly
 
 ---
@@ -62,8 +71,8 @@ A full-stack personal finance management application with multi-currency support
 
 | Technology | Purpose |
 |---|---|
-| **Node.js 20** + **Express 5** | REST API server — Express 5's native async error propagation eliminates manual `try/catch` boilerplate |
-| **PostgreSQL** (Neon) | Relational database — foreign keys enforce data integrity across users → categories → transactions → budgets |
+| **Node.js 22** + **Express 5** | REST API server — Express 5's native async error propagation eliminates manual `try/catch` boilerplate |
+| **PostgreSQL** (Neon) | Relational database — foreign keys enforce data integrity across users → categories → transactions → budgets → goals |
 | **Prisma ORM 6** | Type-safe database client — schema-driven models, auto-generated queries, and graceful connection pool management |
 | **JWT (jsonwebtoken)** | Stateless authentication — self-verifying tokens, no server-side session store needed |
 | **Passport.js** | Google OAuth 2.0 strategy — clean adapter pattern for social login |
@@ -95,51 +104,53 @@ A full-stack personal finance management application with multi-currency support
 │                                                                 │
 │  ┌──────────┐ ┌────────────┐ ┌──────────┐ ┌─────────────────┐   │
 │  │  Auth    │ │ Dashboard  │ │Budgets & │ │  AI Advisor     │   │
-│  │  Pages   │ │ + Charts   │ │ Notifs   │ │  + AutoCat      │   │
+│  │  Pages   │ │+Goals Wdgt │ │ Notifs   │ │  + AutoCat      │   │
 │  └────┬─────┘ └─────┬──────┘ └────┬─────┘ └───────┬─────────┘   │
 │       │             │             │               │             │
-│       └──────┬──────┴──────┬──────┘               │             │
-│              │ AuthContext │  Axios Interceptors  │             │
-│              │ (JWT store) │  (auto Bearer token) │             │
-└──────────────┼─────────────┼──────────────────────┼─────────────┘
-               │             │                      │
-               ▼             ▼                      ▼
+│  ┌────▼─────────────▼─────────────▼───────────────▼────────┐    │
+│  │            AuthContext (JWT)  +  Axios Interceptors     │    │
+│  └────────────────────────────┬────────────────────────────┘    │
+└───────────────────────────────┼─────────────────────────────────┘
+                                │
+                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                       BACKEND (Render)                          │
 │                                                                 │
-│  Node.js 20 + Express 5                                         │
+│  Node.js 22 + Express 5                                         │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │                    Middleware Layer                     │    │
 │  │  CORS · JWT Auth · Error Handler · Multer (uploads)     │    │
-│  └────────────────────────┬────────────────────────────────┘    │
-│                           │                                     │
-│  ┌────────┬──────────┬────┴────┬──────────┬────────────────┐    │
-│  │  Auth  │Categories│Transact-│ Budgets  │  Dashboard     │    │
-│  │  Ctrl  │  Ctrl    │ions Ctrl│  Ctrl    │  Ctrl          │    │
-│  └────┬───┘└────┬────┘└───┬────┘└────┬────┘└───────┬───────┘    │
-│       │         │         │          │             │            │
-│       │         │    ┌────▼────┐     │             │            │
-│       │         │    │Notif    │     │    ┌────────▼────────┐   │
-│       │         │    │Service  │ ◄───┘    │Exchange Rates   │   │
-│       │         │    │(budget  │          │Service (cached) │   │
-│       │         │    │ alerts) │◄─────────┤                 │   │
-│       │         │    └────┬────┘          └─────────────────┘   │
-│       │         │         │                                     │
-│       │         │    ┌────▼────┐  ┌───────────────┐             │
-│       │         │    │SendGrid │  │  Groq LLM     │             │
-│       │         │    │ (email) │  │  (AI chat +   │             │
-│       │         │    └─────────┘  │   categorise) │             │
-│       │         │                 └───────────────┘             │
-└───────┼─────────┼─────────────────────────────────────────────-─┘
-        │         │
-        ▼         ▼
+│  └──┬──────────┬──────────┬──────────┬──────────┬──────────┘    │
+│     │          │          │          │          │               │
+│  Auth      Categories  Transact-  Budgets    Goals              │
+│  Ctrl       Ctrl       ions Ctrl   Ctrl       Ctrl              │
+│     │          │          │          │          │               │
+│     │          │    ┌─────▼──────────▼──────────▼──────────┐    │
+│     │          │    │        goalAllocationService         │    │
+│     │          │    │  FX conversion · Decimal precision   │    │
+│     │          │    │  Multi-goal split · 100% guard       │    │
+│     │          │    └──────────────────────────────────────┘    │
+│     │          │          │                                     │
+│     │          │    ┌─────▼────┐  ┌──────────────────────┐      │
+│     │          │    │  Notif   │  │   Exchange Rates     │      │
+│     │          │    │ Service  │  │   Service (1hr cache)│      │
+│     │          │    └─────┬────┘  └──────────────────────┘      │
+│     │          │          │                                     │
+│     │          │    ┌─────▼────┐  ┌───────────────┐             │
+│     │          │    │SendGrid  │  │  Groq LLM     │             │
+│     │          │    │ (email)  │  │  (chat+categ.)│             │
+│     │          │    └──────────┘  └───────────────┘             │
+└─────┼──────────┼──────────────────────────────────────────────-─┘
+      │          │
+      ▼          ▼
 ┌─────────────────────────────────────────┐
 │         PostgreSQL (Neon)               │
 │    accessed via Prisma ORM              │
 │                                         │
 │  users · categories · transactions      │
-│  budgets · notifications                │
+│  budgets · notifications · goals        │
+│  transaction_goal_allocations           │
 └─────────────────────────────────────────┘
 ```
 
@@ -147,8 +158,9 @@ A full-stack personal finance management application with multi-currency support
 1. User interacts with React frontend → Axios sends request with JWT in `Authorization` header
 2. Express middleware verifies JWT → extracts `req.user.id`
 3. Controller executes queries against PostgreSQL via the **Prisma client**
-4. For expense transactions: `notificationService` asynchronously checks budget thresholds, converts cross-currency spending via the `exchangeRates` service, and triggers SendGrid email + in-app notification if 80%/100% is breached
-5. AI endpoints inject the user's real financial context into the Groq system prompt for personalised responses
+4. For income transactions with goal allocations: `goalAllocationService` validates, FX-converts, and atomically writes allocations inside a `prisma.$transaction` block
+5. For expense transactions: `notificationService` asynchronously checks budget thresholds, converts cross-currency spending via the `exchangeRates` service, and triggers SendGrid email + in-app notification if 80%/100% is breached
+6. AI endpoints inject the user's real financial context into the Groq system prompt for personalised responses
 
 ---
 
@@ -159,11 +171,9 @@ FinTrack/
 │
 ├── backend/
 │   ├── config/
-│   │   ├── currencies.js          # Supported currency codes
-│   │   ├── db.js                  # Legacy pg Pool (kept for compatibility)
+│   │   ├── currencies.js          # Supported currency codes list
 │   │   ├── email.js               # SendGrid wrapper (graceful fallback if no key)
 │   │   ├── groq.js                # Groq client singleton (null if key absent)
-│   │   ├── migrate.js             # Auto-runs pending SQL migrations on startup
 │   │   ├── passport.js            # Google OAuth 2.0 strategy
 │   │   ├── prisma.js              # Prisma client singleton
 │   │   └── upload.js              # Multer disk storage + MIME whitelist
@@ -174,8 +184,9 @@ FinTrack/
 │   │   ├── budgetController.js    # CRUD + cross-currency spend aggregation
 │   │   ├── categoryController.js  # CRUD for income/expense categories
 │   │   ├── dashboardController.js # Summary, monthly report, category breakdown, rates
+│   │   ├── goalController.js      # CRUD for savings goals + dynamic progress enrichment
 │   │   ├── notificationController.js  # List, read, delete notifications
-│   │   └── transactionController.js   # CRUD + receipt upload/delete
+│   │   └── transactionController.js   # CRUD + receipt upload/delete + goal allocation
 │   │
 │   ├── middlewares/
 │   │   ├── authMiddleware.js      # JWT verification → req.user
@@ -184,7 +195,8 @@ FinTrack/
 │   │
 │   ├── prisma/
 │   │   └── schema.prisma          # Prisma data model (users, categories,
-│   │                              #   transactions, budgets, notifications)
+│   │                              #   transactions, budgets, notifications,
+│   │                              #   goals, transaction_goal_allocations)
 │   │
 │   ├── routes/                    # Express Router files (1:1 with controllers)
 │   │   ├── aiRoutes.js
@@ -192,12 +204,14 @@ FinTrack/
 │   │   ├── budgetRoutes.js
 │   │   ├── categoryRoutes.js
 │   │   ├── dashboardRoutes.js
+│   │   ├── goalRoutes.js
 │   │   ├── notificationRoutes.js
 │   │   └── transactionRoutes.js
 │   │
 │   ├── services/
-│   │   ├── exchangeRates.js       # Shared exchange rate cache (1-hour TTL)
-│   │   └── notificationService.js # Budget breach detection + email dispatch
+│   │   ├── exchangeRates.js           # Shared exchange rate cache (1-hour TTL)
+│   │   ├── goalAllocationService.js   # Dual-mode allocation resolver + FX conversion
+│   │   └── notificationService.js     # Budget breach detection + email dispatch
 │   │
 │   ├── uploads/                   # Receipt files on disk (git-ignored)
 │   ├── server.js                  # App entry point
@@ -226,13 +240,14 @@ FinTrack/
         │   ├── AIAdvisor.jsx          # Multi-turn AI chat interface
         │   ├── Budgets.jsx            # Budget CRUD + per-category progress bars
         │   ├── Categories.jsx         # Category management
-        │   ├── Dashboard.jsx          # Financial overview + charts + budget summary
+        │   ├── Dashboard.jsx          # Financial overview + charts + goals widget
+        │   ├── Goals.jsx              # Savings goals CRUD + radial progress rings
         │   ├── Login.jsx              # Email/password + Google OAuth
         │   ├── Notifications.jsx      # In-app notification centre
         │   ├── OAuthCallback.jsx      # Google OAuth token handler
         │   ├── Profile.jsx            # Update name + preferred currency
         │   ├── Register.jsx           # New account creation
-        │   └── Transactions.jsx       # Transaction list + form + receipt management
+        │   └── Transactions.jsx       # Transaction list + form + receipt + goal allocation
         │
         ├── App.jsx                    # Routes + AuthProvider wrapper
         └── main.jsx                   # Entry point
@@ -255,45 +270,55 @@ Managed via **Prisma ORM** with the schema defined in `backend/prisma/schema.pri
 │ google_id VARCHAR(255) UNIQUE                    │
 │ preferred_currency VARCHAR(3) DEFAULT 'INR'      │
 │ created_at TIMESTAMPTZ                           │
-└──────────────┬───────────────────────────────────┘
-               │
-       ┌───────┴───────┐
-       ▼               ▼
-┌──────────────┐ ┌──────────────────────────────────┐
-│  categories  │ │          notifications           │
-├──────────────┤ ├──────────────────────────────────┤
-│ id (UUID PK) │ │ id (UUID PK)                     │
-│ user_id (FK) │ │ user_id (FK → users)             │
-│ name         │ │ budget_id (FK → budgets)         │
-│ type (income │ │ type (budget_warning |           │
-│  | expense)  │ │       budget_exceeded)           │
-│ created_at   │ │ title, message                   │
-└──────┬───────┘ │ is_read BOOLEAN DEFAULT false    │
-       │         │ month, year                      │
-       │         │ UNIQUE (budget_id, type,         │
-       │         │         month, year)             │
-       │         │ created_at                       │
-       │         └──────────────────────────────────┘
-       │
-  ┌────┴─────────────────┐
-  ▼                      ▼
-┌─────────────────┐ ┌──────────────────┐
-│  transactions   │ │     budgets      │
-├─────────────────┤ ├──────────────────┤
-│ id (UUID PK)    │ │ id (UUID PK)     │
-│ user_id (FK)    │ │ user_id (FK)     │
-│ category_id(FK) │ │ category_id (FK) │
-│ amount NUMERIC  │ │ monthly_limit    │
-│ type (income |  │ │   NUMERIC        │
-│       expense)  │ │ currency         │
-│ description     │ │ UNIQUE(user_id,  │
-│ date DATE       │ │  category_id)    │
-│ currency        │ │ created_at       │
-│ receipt_url     │ └──────────────────┘
-│ created_at      │
-│ updated_at      │
-└─────────────────┘
+└──────────┬───────────────────┬───────────────────┘
+           │                   │
+   ┌───────┴──────┐    ┌───────┴──────────────┐
+   ▼              ▼    ▼                       ▼
+┌──────────┐  ┌──────────────┐  ┌─────────────────────┐
+│  goals   │  │  categories  │  │    notifications    │
+├──────────┤  ├──────────────┤  ├─────────────────────┤
+│ id (PK)  │  │ id (UUID PK) │  │ id (UUID PK)        │
+│ user_id  │  │ user_id (FK) │  │ user_id (FK)        │
+│ name     │  │ name         │  │ budget_id (FK)      │
+│ target_  │  │ type (income │  │ type, title, message│
+│  amount  │  │  | expense)  │  │ is_read BOOLEAN     │
+│ target_  │  │ created_at   │  │ month, year         │
+│  date    │  └──────┬───────┘  │ UNIQUE(budget_id,   │
+│ currency │         │          │   type, month, year)│
+│ created_ │    ┌────┴──────────┴──┐                  │
+│  at      │    ▼                  ▼                  │
+└────┬─────┘  ┌───────────────┐ ┌──────────────┐      │
+     │        │  transactions │ │   budgets    │      │
+     │        ├───────────────┤ ├──────────────┤      │
+     │        │ id (UUID PK)  │ │ id (UUID PK) │      │
+     │        │ user_id (FK)  │ │ user_id (FK) │      │
+     │        │ category_id   │ │ category_id  │      │
+     │        │ amount        │ │ monthly_limit│      │
+     │        │ type          │ │ currency     │      │
+     │        │ description   │ │ UNIQUE(user, │      │
+     │        │ date          │ │  category)   │──────┘
+     │        │ currency      │ └──────────────┘
+     │        │ receipt_url   │
+     │        └───────┬───────┘
+     │                │
+     │                ▼
+     │  ┌──────────────────────────────────┐
+     └─►│   transaction_goal_allocations   │
+        ├──────────────────────────────────┤
+        │ id (UUID PK)                     │
+        │ transaction_id (FK → CASCADE)    │
+        │ goal_id (FK → CASCADE)           │
+        │ allocation_pct  DECIMAL(5,2)     │
+        │ allocated_amount DECIMAL(12,2)   │
+        │ created_at                       │
+        │ UNIQUE(transaction_id, goal_id)  │
+        └──────────────────────────────────┘
 ```
+
+**Key integrity rules:**
+- Deleting a transaction → cascades to `transaction_goal_allocations` automatically (no orphaned allocation rows)
+- Deleting a goal → cascades to its allocation rows (goal balance never references a dead goal)
+- Editing a transaction's amount or currency → controller atomically wipes and re-inserts its allocations in a single `prisma.$transaction` block
 
 ---
 
@@ -317,12 +342,52 @@ Managed via **Prisma ORM** with the schema defined in `backend/prisma/schema.pri
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | `GET` | `/` | ✓ | List transactions (filter: `type`, `currency`, `category_id`, `from`, `to`) |
-| `POST` | `/` | ✓ | Create transaction |
+| `POST` | `/` | ✓ | Create transaction — accepts optional `goal_allocations[]` array for income |
 | `GET` | `/:id` | ✓ | Get single transaction |
-| `PUT` | `/:id` | ✓ | Update transaction |
-| `DELETE` | `/:id` | ✓ | Delete transaction |
+| `PUT` | `/:id` | ✓ | Update transaction — re-computes goal allocations atomically if amount/currency changes |
+| `DELETE` | `/:id` | ✓ | Delete transaction (cascades allocations) |
 | `POST` | `/:id/receipt` | ✓ | Upload receipt (multipart/form-data) |
 | `DELETE` | `/:id/receipt` | ✓ | Remove receipt |
+
+**Goal allocation payload (income transactions only):**
+```json
+{
+  "type": "income",
+  "amount": 10000,
+  "currency": "INR",
+  "goal_allocations": [
+    { "goal_id": "<uuid>", "allocation_pct": 20 },
+    { "goal_id": "<uuid>", "allocated_amount": 1500 }
+  ]
+}
+```
+> Each entry accepts either `allocation_pct` OR `allocated_amount`. Total cannot exceed 100% of the transaction amount.
+
+### Goals — `/api/goals`
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/` | ✓ | List all goals with computed progress (current_amount, completion_pct, status, required_monthly_savings) |
+| `POST` | `/` | ✓ | Create goal (name, target_amount, target_date, currency) |
+| `GET` | `/:id` | ✓ | Get single goal with progress |
+| `PUT` | `/:id` | ✓ | Update goal fields |
+| `DELETE` | `/:id` | ✓ | Delete goal (cascades allocations) |
+
+**Goal response shape:**
+```json
+{
+  "id": "...",
+  "name": "New Laptop",
+  "target_amount": 80000,
+  "current_amount": 24500.00,
+  "currency": "INR",
+  "completion_pct": 30.6,
+  "months_remaining": 4,
+  "days_remaining": 127,
+  "status": "active",
+  "required_monthly_savings": 13875.00
+}
+```
 
 ### Categories — `/api/categories`
 
@@ -391,7 +456,7 @@ cd FinTrack
 # Backend
 cd backend
 cp .env.example .env    # Fill in your values (see Environment Variables section)
-npm install
+npm install             # postinstall automatically runs `prisma generate`
 
 # Frontend
 cd ../frontend
@@ -399,14 +464,14 @@ cp .env.example .env    # Set VITE_API_URL=http://localhost:3000/api
 npm install
 ```
 
-### 2. Generate Prisma Client
+### 2. Push Schema to Database
 
 ```bash
 cd backend
-npx prisma generate
+npx prisma db push
 ```
 
-> This step is required before starting the server for the first time. It generates the type-safe Prisma client from `prisma/schema.prisma`.
+> This creates all tables (users, categories, transactions, budgets, notifications, goals, transaction_goal_allocations) in your Neon database. The Prisma client is already generated by the `postinstall` script in step 1.
 
 ### 3. Start Backend
 
@@ -476,7 +541,7 @@ VITE_API_URL=http://localhost:3000/api
 
 | Service | Component | Configuration |
 |---------|-----------|---------------|
-| **Render** | Backend | Root Directory: `backend/`, Build: `npm install && npx prisma generate`, Start: `node server.js` |
+| **Render** | Backend | Root Directory: `backend/`, Build: `npm install` *(postinstall runs prisma generate automatically)*, Start: `node server.js` |
 | **Vercel** | Frontend | Root Directory: `frontend/`, Framework: Vite, Output: `dist/` |
 | **Neon** | Database | Serverless PostgreSQL with connection pooling |
 
@@ -488,61 +553,82 @@ VITE_API_URL=http://localhost:3000/api
   { "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }] }
   ```
 
+> **Important:** The `postinstall` script (`prisma generate`) in `package.json` ensures the Prisma client is always regenerated from the committed schema on every Render deploy. Without this, new schema models would be missing from the deployed client and cause 500 errors.
+
 ---
 
 ## 🎯 Key Design Decisions
 
 ### 1. Prisma ORM for Database Access
-All database interactions use **Prisma Client 6**, generated from a single `schema.prisma` file. This gives type-safe queries, automatic connection pool management, and a single source of truth for the data model. The schema is maintained in `backend/prisma/schema.prisma`.
+All database interactions use **Prisma Client 6**, generated from a single `schema.prisma` file. This gives type-safe queries, automatic connection pool management, and a single source of truth for the data model. A `postinstall` npm script ensures the client is always regenerated on every deployment.
 
-### 2. Server-Side Cross-Currency Budget Aggregation
-Budget spending is converted to the budget's currency on the backend using a shared exchange rate cache (`exchangeRates.js`, 1-hour TTL). This ensures the API response is immediately usable and consistent — the frontend doesn't need to re-aggregate. The budget page displays only per-category spending progress; the global income/expense summary lives exclusively on the Dashboard.
+### 2. Dynamic Goal Aggregation (No Stale State)
+The `goals` table has **no `current_amount` column**. Progress is computed on-the-fly by summing `allocated_amount` from `transaction_goal_allocations` in a single Prisma query with `include: { allocations }`, followed by an in-memory `.reduce()`. This eliminates state desync — edits and deletes automatically correct the goal balance without any compensating update logic.
 
-### 3. Fire-and-Forget Notifications
+### 3. Floating-Point Safe Decimal Arithmetic
+Goal balances are summed using `Prisma.Decimal` arithmetic throughout the reduce loop — never native JavaScript `Number` addition. Casting to a primitive only happens at the final `.toNumber()` call before the JSON response. This prevents floating-point accumulation errors (e.g. `100.10 + 200.20 ≠ 300.30` in JS) from corrupting financial figures over hundreds of allocations.
+
+### 4. Atomic Allocation Writes
+Both `createTransaction` and `updateTransaction` run inside a `prisma.$transaction` block. The create path inserts the transaction row and all its allocation rows together. The update path re-computes allocations and does a wipe+re-insert of allocation rows in the same block. Either everything commits or nothing does — there is no partial state.
+
+### 5. Multi-Currency FX Conversion at Write Time (Locked Rate)
+When an income transaction in USD allocates to a goal tracked in INR, `goalAllocationService` calls the shared `convertCurrency()` utility at write time and stores the converted `allocated_amount` in the join table. The FX rate is **locked at that moment**. This means goal balances remain stable even if market rates change later — a standard practice in financial systems.
+
+### 6. Dual-Mode Allocation Input
+`goalAllocationService.resolveAllocations()` accepts either `allocation_pct` (percentage) or `allocated_amount` (flat amount) per goal, normalising both into stored `(allocation_pct, allocated_amount)` pairs. This solves the rounding frustration of always having to work in percentages.
+
+### 7. Server-Side Cross-Currency Budget Aggregation
+Budget spending is converted to the budget's currency on the backend using the shared exchange rate cache (`exchangeRates.js`, 1-hour TTL). The API response is immediately usable and consistent — the frontend doesn't need to re-aggregate.
+
+### 8. Fire-and-Forget Notifications
 Budget breach detection runs asynchronously after transaction creation. A failed SendGrid call never surfaces as a transaction error — it's logged server-side only. This keeps transaction creation latency unaffected by email delivery.
 
-### 4. AI Graceful Degradation
+### 9. AI Graceful Degradation
 The Groq client initialises as `null` when `GROQ_API_KEY` is absent. Every AI endpoint checks for `null` first and returns `503` with a human-readable message. The rest of the app works fully without an AI key.
 
-### 5. Fallback Exchange Rates on the Frontend
-The frontend pre-seeds `FALLBACK_RATES` for all 10 currencies so the dashboard renders valid numbers immediately, even before the external rate API responds or if it's temporarily offline.
-
-### 6. Notification Deduplication
-The `notifications` table has a `UNIQUE(budget_id, type, month, year)` constraint. This means each budget can trigger at most one warning and one exceeded alert per calendar month — no duplicate notifications.
-
-### 7. Separation of Concerns: Dashboard vs Budgets
-The **Dashboard** is the home for global financial summaries (total income, total expenses, net savings) and the monthly trend chart. The **Budgets** page focuses exclusively on per-category spending limits and progress bars. This avoids redundancy and keeps each page purposeful.
+### 10. Resilient Parallel Data Fetching
+On pages that fetch multiple resources (Dashboard, Transactions), the goals endpoint is fetched **independently** — not inside the main `Promise.all`. If the goals API fails, the core financial data (transactions, budgets, summary) still loads successfully.
 
 ---
 
 ## 🧩 Challenges & Solutions
 
-### 1. Cross-Currency Budget Tracking
+### 1. Prisma Client Not Regenerated on Deploy
+**Problem:** Render's build command was only `npm install`. The Prisma client cached in `node_modules/@prisma/client` was generated before the new schema models (goals, transaction_goal_allocations) were added. Every call to `prisma.goals.*` on the production server returned a 500 because the model didn't exist in the deployed client.
+
+**Solution:** Added `"postinstall": "prisma generate"` to `backend/package.json`. Now every `npm install` — locally and on Render — automatically regenerates the Prisma client from the committed schema.
+
+### 2. Goals Fetch Crashing the Transactions Page
+**Problem:** `Transactions.jsx` fetched transactions, categories, and goals inside a single `Promise.all`. When `/api/goals` returned 500 (due to the missing Prisma client issue above), the entire `Promise.all` rejected — transactions and categories were never set, leaving the page blank.
+
+**Solution:** Separated the goals fetch into its own independent `try/catch` block that runs after the core data loads. A goals failure logs a warning only — transactions always load regardless.
+
+### 3. Cross-Currency Allocation Corruption
+**Problem:** Early designs incremented `goal.current_amount += allocated_amount` directly without considering currency mismatches. A ₹500 allocation would be added to a $500 goal as-is, silently corrupting the balance.
+
+**Solution:** All allocations are routed through `goalAllocationService.resolveAllocations()`, which checks `goal.currency !== txCurrency` and calls `convertCurrency()` before storing. The converted amount is locked in the join table at write time.
+
+### 4. Cross-Currency Budget Tracking
 **Problem:** A budget set in INR was ignoring USD or EUR transactions in the same category — the original query had `AND t.currency = b.currency` which filtered them out entirely.
 
 **Solution:** Rewrote the budget queries to collect spending per currency using `json_agg`, then created a shared `exchangeRates.js` service that caches live rates for 1 hour. Both `budgetController` and `notificationService` convert all per-currency spending into the budget's currency before calculating percentages.
 
-### 2. Uncategorised Transactions Invisible on Dashboard
+### 5. Uncategorised Transactions Invisible on Dashboard
 **Problem:** Dashboard queries used `INNER JOIN categories` and filtered on `c.type` — uncategorised transactions (where `category_id` is NULL) had no category row, so they vanished from summaries entirely.
 
 **Solution:** Switched to `LEFT JOIN` and added a `type` column directly on the `transactions` table. All queries now use `t.type` instead of `c.type`. Uncategorised transactions appear as "Uncategorized" in the breakdown.
 
-### 3. Notification System Not Triggering
-**Problem:** Multiple issues — `createTransaction` silenced all notification errors with `.catch(() => {})`, `updateTransaction` never called `checkBudgetAndNotify` at all, and the spending query didn't filter by `type = 'expense'` (income was inflating budget spending figures).
-
-**Solution:** Added proper error logging, added notification checks to `updateTransaction`, filtered spending to expense-only, and added diagnostic `console.log` statements for tracing threshold crossings.
-
-### 4. Groq JSON Output Inconsistency
+### 6. Groq JSON Output Inconsistency
 **Problem:** The `categorize` endpoint expected pure JSON from Groq, but the model occasionally wrapped output in markdown code blocks, causing `JSON.parse()` to throw.
 
 **Solution:** Added regex extraction (`raw.match(/\{[\s\S]*\}/)`) before parsing, dropped temperature to `0.1` for deterministic output, and added a graceful fallback returning `{ category_id: null, confidence: "low" }` instead of a 500 error.
 
-### 5. Express Session + CORS Cookie Issues with Google OAuth
+### 7. Express Session + CORS Cookie Issues with Google OAuth
 **Problem:** Google OAuth required sessions for the handshake, but cross-origin cookies between Vercel (frontend) and Render (backend) were being blocked by the browser.
 
 **Solution:** Configured Express sessions with `cookie: { secure: true, sameSite: "none" }` for production, set `trust proxy`, and ensured CORS allowed credentials from the exact frontend origin (no wildcards).
 
-### 6. Migrating from Raw SQL to Prisma ORM
+### 8. Migrating from Raw SQL to Prisma ORM
 **Problem:** The codebase originally used the `pg` library for raw SQL queries. Migrating to Prisma required replacing all manual SQL strings with type-safe Prisma client methods while preserving the existing business logic, especially complex aggregation queries for budgets and dashboard summaries.
 
 **Solution:** Migrated all controllers to use `prisma.*` model methods. The Prisma schema was introspected from the existing PostgreSQL database using `prisma db pull`, ensuring the models matched the production schema exactly. A singleton `prisma.js` config handles client instantiation and graceful `$disconnect()` on `SIGTERM`/`SIGINT`.
