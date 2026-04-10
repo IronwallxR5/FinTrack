@@ -381,7 +381,14 @@ export default function Transactions() {
                           className="flex-1 min-w-[160px] text-sm"
                         >
                           <option value="">Select goal…</option>
-                          {goals.filter((g) => g.status !== "completed").map((g) => (
+                          {goals
+                            .filter((g) => g.status !== "completed")
+                            .filter((g) =>
+                              // allow the goal already chosen in THIS row; exclude ones chosen in OTHER rows
+                              g.id === alloc.goal_id ||
+                              !goalAllocations.some((a, j) => j !== i && a.goal_id === g.id)
+                            )
+                            .map((g) => (
                             <option key={g.id} value={g.id}>{g.name} ({g.currency})</option>
                           ))}
                         </Select>
