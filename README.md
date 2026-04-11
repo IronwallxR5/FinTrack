@@ -72,7 +72,7 @@ A full-stack personal finance management application with multi-currency support
 
 | Technology | Purpose |
 |---|---|
-| **Node.js 22** + **Express 5** | REST API server — Express 5's native async error propagation eliminates manual `try/catch` boilerplate |
+| **Node.js 22** + **Express 5** | REST API server |
 | **PostgreSQL** (Neon) | Relational database — foreign keys enforce data integrity across users → categories → transactions → budgets → goals |
 | **Prisma ORM 6** | Type-safe database client — schema-driven models, auto-generated queries, and graceful connection pool management |
 | **JWT (jsonwebtoken)** | Stateless authentication — self-verifying tokens, no server-side session store needed |
@@ -337,7 +337,7 @@ Managed via **Prisma ORM** with the schema defined in `backend/prisma/schema.pri
 | `GET` | `/google` | ✗ | Initiate Google OAuth flow |
 | `GET` | `/google/callback` | ✗ | OAuth callback → redirects with JWT |
 | `GET` | `/me` | ✓ | Get current user profile |
-| `PUT` | `/me` | ✓ | Update name / preferred_currency |
+| `PUT` | `/me` | ✓ | Update name / password / preferred_currency |
 
 ### Transactions — `/api/transactions`
 
@@ -398,7 +398,7 @@ Managed via **Prisma ORM** with the schema defined in `backend/prisma/schema.pri
 | `GET` | `/` | ✓ | List categories (filter: `type`) |
 | `POST` | `/` | ✓ | Create category |
 | `PUT` | `/:id` | ✓ | Update category |
-| `DELETE` | `/:id` | ✓ | Delete category (cascades transactions) |
+| `DELETE` | `/:id` | ✓ | Delete category — linked transactions are moved to uncategorized (category_id set to null) |
 
 ### Budgets — `/api/budgets`
 
@@ -458,7 +458,7 @@ cd FinTrack
 # Backend
 cd backend
 cp .env.example .env    # Fill in your values (see Environment Variables section)
-npm install             # postinstall automatically runs `prisma generate`
+npm install             # postinstall automatically runs `prisma migrate deploy && prisma generate`
 
 # Frontend
 cd ../frontend
@@ -592,6 +592,9 @@ Budget breach detection runs asynchronously after transaction creation. A failed
 ### 9. AI Graceful Degradation
 The Groq client initialises as `null` when `GROQ_API_KEY` is absent. Every AI endpoint checks for `null` first and returns `503` with a human-readable message. The rest of the app works fully without an AI key.
 
+### 10. Stateless Server — No In-Memory Session Store
+All user state is encoded in the JWT. The Express session is used only for the Google OAuth handshake (short-lived, 5-minute cookie) and discarded immediately after the callback redirects. This means multiple Render instances or a server restart never causes authentication failures.
+
 ### 11. Goal Deadline Notifications (Unified Alert System)
 Goal deadline alerts reuse the existing `notifications` table and the `UNIQUE(budget_id, type, month, year)` deduplication constraint by storing `goal_id` in the `budget_id` column (a nullable FK) and using `type = 'goal_deadline_warning'`. No schema migration was required — the constraint already handles both cases. The check runs fire-and-forget from `getGoals` after the response is already sent, so it never adds latency to page load.
 
@@ -602,7 +605,7 @@ Goal deadline alerts reuse the existing `notifications` table and the `UNIQUE(bu
 ### 1. Prisma Client Not Regenerated on Deploy
 **Problem:** Render's build command was only `npm install`. The Prisma client cached in `node_modules/@prisma/client` was generated before the new schema models (goals, transaction_goal_allocations) were added. Every call to `prisma.goals.*` on the production server returned a 500 because the model didn't exist in the deployed client.
 
-**Solution:** Added `"postinstall": "prisma generate"` to `backend/package.json`. Now every `npm install` — locally and on Render — automatically regenerates the Prisma client from the committed schema.
+**Solution:** Switched to a proper Prisma migrations workflow. A baseline migration (`0001_init`) was generated from the existing schema using `prisma migrate diff`, marked as applied with `prisma migrate resolve --applied`, and committed to `prisma/migrations/`. The `postinstall` script now runs `prisma migrate deploy && prisma generate` so every deploy applies pending migrations and rebuilds the JS client from the committed schema.
 
 ### 2. Goals Fetch Crashing the Transactions Page
 **Problem:** `Transactions.jsx` fetched transactions, categories, and goals inside a single `Promise.all`. When `/api/goals` returned 500 (due to the missing Prisma client issue above), the entire `Promise.all` rejected — transactions and categories were never set, leaving the page blank.

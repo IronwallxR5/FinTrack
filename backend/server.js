@@ -61,7 +61,6 @@ app.listen(PORT, () => {
   console.log(`Server is running on PORT ${PORT}`);
 });
 
-
 // Graceful shutdown
 const shutdown = async (signal) => {
   console.log(`\n${signal} received — shutting down gracefully`);
