@@ -17,7 +17,7 @@ async function buildFinancialContext(userId) {
   const year = now.getFullYear();
   const monthName = now.toLocaleString("default", { month: "long" });
 
-  // All-time summary
+  // 1. All-time income / expense summary
   const summaryRows = await prisma.$queryRaw(
     Prisma.sql`
       SELECT
@@ -30,7 +30,49 @@ async function buildFinancialContext(userId) {
     `
   );
 
-  // Monthly spending by category
+  // 2. Goals — dynamic balances from the join table (no stale current_amount column)
+  const goals = await prisma.goals.findMany({
+    where: { user_id: userId },
+    include: { allocations: { select: { allocated_amount: true } } },
+    orderBy: { target_date: "asc" },
+  });
+
+  // Build locked-capital map: how much is ring-fenced per currency in incomplete goals
+  const lockedCapital = {};   // { "INR": 14500, "USD": 0, ... }
+  const goalLines = [];
+
+  if (goals.length === 0) {
+    goalLines.push("No savings goals set.");
+  } else {
+    goals.forEach((g) => {
+      const current = g.allocations.reduce(
+        (sum, a) => sum + Number(a.allocated_amount), 0
+      );
+      const target      = Number(g.target_amount);
+      const msRemaining = new Date(g.target_date) - now;
+      const months      = Math.max(1, Math.ceil(msRemaining / (1000 * 60 * 60 * 24 * 30.44)));
+      const pct         = ((current / target) * 100).toFixed(1);
+      const isComplete  = current >= target;
+      const isOverdue   = msRemaining < 0 && !isComplete;
+      const status      = isComplete ? "COMPLETED" : isOverdue ? "OVERDUE" : "ACTIVE";
+      const reqMonthly  = status === "ACTIVE"
+        ? ((target - current) / months).toFixed(2)
+        : "0.00";
+
+      // Only incomplete goals tie up capital
+      if (!isComplete) {
+        lockedCapital[g.currency] = (lockedCapital[g.currency] || 0) + current;
+      }
+
+      goalLines.push(
+        `- [${status}] ${g.name}: ${g.currency} ${current.toFixed(2)} / ${target.toFixed(2)} (${pct}%). ` +
+        `Due: ${new Date(g.target_date).toISOString().slice(0, 10)}. ` +
+        (status === "ACTIVE" ? `Still needs: ${g.currency} ${reqMonthly}/mo.` : "")
+      );
+    });
+  }
+
+  // 3. Monthly spending by category
   const monthlyRows = await prisma.$queryRaw(
     Prisma.sql`
       SELECT
@@ -49,7 +91,7 @@ async function buildFinancialContext(userId) {
     `
   );
 
-  // Recent transactions (using Prisma Client — no raw SQL needed)
+  // 4. Recent transactions
   const recentTx = await prisma.transactions.findMany({
     where: { user_id: userId },
     include: { categories: { select: { name: true, type: true } } },
@@ -57,7 +99,7 @@ async function buildFinancialContext(userId) {
     take: 10,
   });
 
-  // Budget status this month
+  // 5. Budget status this month
   const budgetRows = await prisma.$queryRaw(
     Prisma.sql`
       SELECT
@@ -78,31 +120,39 @@ async function buildFinancialContext(userId) {
     `
   );
 
-  // User info
+  // 6. User info
   const user = await prisma.users.findUnique({
     where: { id: userId },
     select: { name: true, preferred_currency: true },
   });
 
+  // ── Build context string ──────────────────────────────────────────
   const lines = [
     `User: ${user.name || "Unknown"}, preferred currency: ${user.preferred_currency}`,
     `Today: ${now.toISOString().slice(0, 10)}`,
     "",
-    "=== ALL-TIME FINANCIAL SUMMARY ===",
+    "=== LIQUIDITY & ALL-TIME SUMMARY ===",
   ];
 
   if (summaryRows.length === 0) {
     lines.push("No transactions recorded yet.");
   } else {
     summaryRows.forEach((r) => {
-      const net = parseFloat(r.total_income) - parseFloat(r.total_expenses);
+      const income   = parseFloat(r.total_income);
+      const expenses = parseFloat(r.total_expenses);
+      const net      = income - expenses;
+      const locked   = lockedCapital[r.currency] || 0;
+      const freeCash = net - locked;
       lines.push(
-        `${r.currency}: Income ${parseFloat(r.total_income).toFixed(2)}, ` +
-          `Expenses ${parseFloat(r.total_expenses).toFixed(2)}, ` +
-          `Net ${net.toFixed(2)}`
+        `${r.currency}: Income ${income.toFixed(2)} | Expenses ${expenses.toFixed(2)} | ` +
+        `Gross Net ${net.toFixed(2)} | Locked in Goals ${locked.toFixed(2)} | ` +
+        `TRUE FREE CASH ${freeCash.toFixed(2)}`
       );
     });
   }
+
+  lines.push("", "=== SAVINGS GOALS ===");
+  lines.push(...goalLines);
 
   lines.push("", `=== ${monthName.toUpperCase()} ${year} SPENDING BY CATEGORY ===`);
   if (monthlyRows.length === 0) {
@@ -142,7 +192,7 @@ async function buildFinancialContext(userId) {
       const catType = r.categories?.type ?? r.type;
       lines.push(
         `${dateStr} | ${catType === "income" ? "+" : "-"}${r.currency} ${Math.abs(parseFloat(r.amount)).toFixed(2)} | ` +
-          `${r.categories?.name || "Uncategorized"} | ${r.description || "—"}`
+        `${r.categories?.name || "Uncategorized"} | ${r.description || "—"}`
       );
     });
   }
@@ -166,12 +216,15 @@ const chat = async (req, res, next) => {
 
     const context = await buildFinancialContext(userId);
 
-    const systemPrompt = `You are FinTrack AI, a personal financial advisor integrated into the FinTrack app.
-You have access to the user's real financial data shown below. Use it to give specific, data-driven advice.
+    const systemPrompt = `You are FinTrack AI, a sharp and honest personal financial advisor built into the FinTrack app.
+You have access to the user's real-time financial ledger. Use it to give specific, data-driven advice.
 
-Be concise, friendly, and practical. Use numbers from the data when relevant.
-Never make up numbers not present in the data. If you don't have enough data, say so.
-Format responses with short paragraphs or bullet points. Keep replies under 300 words unless asked.
+CRITICAL RULES — follow these for every response:
+1. LIQUIDITY OVER NET WORTH: The "TRUE FREE CASH" figure is the only money the user can actually spend. "Gross Net" includes money already committed to savings goals. Never advise spending from locked goal capital.
+2. GOAL AWARENESS: When a user asks about affording something, check their SAVINGS GOALS. If they have ACTIVE goals with deficits or OVERDUE goals, flag this before green-lighting any discretionary spend.
+3. BUDGET AWARENESS: If a budget is at WARNING or EXCEEDED status, proactively surface it when relevant.
+4. NUMBERS ONLY FROM DATA: Never invent figures. If the data is insufficient to answer, say so directly.
+5. BE DIRECT: Short paragraphs or bullet points. Honest, not flattering. Under 300 words unless specifically asked for more.
 
 --- USER FINANCIAL DATA ---
 ${context}
