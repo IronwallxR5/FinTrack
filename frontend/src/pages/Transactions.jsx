@@ -116,13 +116,14 @@ export default function Transactions() {
       type: tx.type || "expense",
     });
 
-    // Pre-populate existing goal allocations so the user sees what was already set
+    // Pre-populate existing goal allocations as locked (read-only) pills
     if (tx.type === "income" && Array.isArray(tx.goal_allocations) && tx.goal_allocations.length > 0) {
       setGoalAllocations(
         tx.goal_allocations.map((a) => ({
           goal_id: a.goal_id,
-          mode: "amount",                            // show stored flat amounts — clearer than a recalculated %
+          mode: "amount",
           value: String(parseFloat(a.allocated_amount)),
+          locked: true,   // shows as a read-only pill until the user clicks Edit
         }))
       );
     } else {
@@ -363,13 +364,16 @@ export default function Transactions() {
                       <Target className="h-4 w-4 text-indigo-600" />
                       Allocate to Goals <span className="text-muted-foreground font-normal">(optional)</span>
                     </Label>
-                    <Button
-                      type="button" variant="outline" size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => setGoalAllocations((prev) => [...prev, { goal_id: "", mode: "pct", value: "" }])}
-                    >
-                      <PlusCircle className="h-3 w-3 mr-1" /> Add Goal
-                    </Button>
+                    {/* Only show Add Goal if there are still unallocated goals */}
+                    {goals.filter((g) => g.status !== "completed" && !goalAllocations.some((a) => a.goal_id === g.id)).length > 0 && (
+                      <Button
+                        type="button" variant="outline" size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setGoalAllocations((prev) => [...prev, { goal_id: "", mode: "pct", value: "", locked: false }])}
+                      >
+                        <PlusCircle className="h-3 w-3 mr-1" /> Add Goal
+                      </Button>
+                    )}
                   </div>
 
                   {goalAllocations.length === 0 && (
@@ -377,7 +381,6 @@ export default function Transactions() {
                   )}
 
                   {goalAllocations.map((alloc, i) => {
-                    // Running total for visual feedback
                     const totalPct = goalAllocations.reduce((sum, a) => {
                       if (a.mode === "pct") return sum + (parseFloat(a.value) || 0);
                       if (a.mode === "amount" && parseFloat(form.amount) > 0)
@@ -385,56 +388,104 @@ export default function Transactions() {
                       return sum;
                     }, 0);
                     const overLimit = totalPct > 100;
+                    const goalObj = goals.find((g) => g.id === alloc.goal_id);
 
+                    // ── Locked (read-only) pill ─────────────────────────────
+                    if (alloc.locked) {
+                      return (
+                        <div key={i} className="flex items-center justify-between gap-2 rounded-md border bg-background px-3 py-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Target className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                            <span className="text-sm font-medium truncate">
+                              {goalObj ? goalObj.name : "Unknown goal"}
+                            </span>
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">
+                              {goalObj ? goalObj.currency : ""} {parseFloat(alloc.value).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              type="button" variant="outline" size="sm"
+                              className="h-6 text-xs px-2"
+                              onClick={() => setGoalAllocations((prev) => prev.map((a, j) => j === i ? { ...a, locked: false } : a))}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              type="button" variant="ghost" size="icon"
+                              className="h-6 w-6"
+                              onClick={() => setGoalAllocations((prev) => prev.filter((_, j) => j !== i))}
+                            >
+                              <MinusCircle className="h-3.5 w-3.5 text-destructive" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // ── Edit / new row ──────────────────────────────────────
                     return (
-                      <div key={i} className="flex items-center gap-2 flex-wrap">
-                        {/* Goal picker */}
-                        <Select
-                          value={alloc.goal_id}
-                          onChange={(e) => setGoalAllocations((prev) => prev.map((a, j) => j === i ? { ...a, goal_id: e.target.value } : a))}
-                          className="flex-1 min-w-[160px] text-sm"
-                        >
-                          <option value="">Select goal…</option>
-                          {goals
-                            .filter((g) => g.status !== "completed")
-                            .filter((g) =>
-                              // allow the goal already chosen in THIS row; exclude ones chosen in OTHER rows
-                              g.id === alloc.goal_id ||
-                              !goalAllocations.some((a, j) => j !== i && a.goal_id === g.id)
-                            )
-                            .map((g) => (
-                            <option key={g.id} value={g.id}>{g.name} ({g.currency})</option>
-                          ))}
-                        </Select>
+                      <div key={i} className="space-y-2 rounded-md border bg-background px-3 py-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Goal picker */}
+                          <Select
+                            value={alloc.goal_id}
+                            onChange={(e) => setGoalAllocations((prev) => prev.map((a, j) => j === i ? { ...a, goal_id: e.target.value } : a))}
+                            className="flex-1 min-w-[160px] text-sm"
+                          >
+                            <option value="">Select goal…</option>
+                            {goals
+                              .filter((g) => g.status !== "completed")
+                              .filter((g) =>
+                                g.id === alloc.goal_id ||
+                                !goalAllocations.some((a, j) => j !== i && a.goal_id === g.id)
+                              )
+                              .map((g) => (
+                                <option key={g.id} value={g.id}>{g.name} ({g.currency})</option>
+                              ))}
+                          </Select>
 
-                        {/* Mode toggle */}
-                        <Select
-                          value={alloc.mode}
-                          onChange={(e) => setGoalAllocations((prev) => prev.map((a, j) => j === i ? { ...a, mode: e.target.value, value: "" } : a))}
-                          className="w-24 text-sm"
-                        >
-                          <option value="pct">%</option>
-                          <option value="amount">Amount</option>
-                        </Select>
+                          {/* Mode toggle */}
+                          <Select
+                            value={alloc.mode}
+                            onChange={(e) => setGoalAllocations((prev) => prev.map((a, j) => j === i ? { ...a, mode: e.target.value, value: "" } : a))}
+                            className="w-24 text-sm"
+                          >
+                            <option value="pct">%</option>
+                            <option value="amount">Amount</option>
+                          </Select>
 
-                        {/* Value */}
-                        <Input
-                          type="number"
-                          step={alloc.mode === "pct" ? "0.01" : "0.01"}
-                          min="0.01"
-                          max={alloc.mode === "pct" ? "100" : undefined}
-                          placeholder={alloc.mode === "pct" ? "e.g. 20" : "e.g. 5000"}
-                          value={alloc.value}
-                          onChange={(e) => setGoalAllocations((prev) => prev.map((a, j) => j === i ? { ...a, value: e.target.value } : a))}
-                          className={`w-28 text-sm ${overLimit ? "border-red-400" : ""}`}
-                        />
+                          {/* Value */}
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            max={alloc.mode === "pct" ? "100" : undefined}
+                            placeholder={alloc.mode === "pct" ? "e.g. 20" : "e.g. 5000"}
+                            value={alloc.value}
+                            onChange={(e) => setGoalAllocations((prev) => prev.map((a, j) => j === i ? { ...a, value: e.target.value } : a))}
+                            className={`w-28 text-sm ${overLimit ? "border-red-400" : ""}`}
+                          />
+                        </div>
 
-                        <Button
-                          type="button" variant="ghost" size="icon"
-                          onClick={() => setGoalAllocations((prev) => prev.filter((_, j) => j !== i))}
-                        >
-                          <MinusCircle className="h-4 w-4 text-destructive" />
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          {/* Confirm (lock) the row once goal + value are filled */}
+                          <Button
+                            type="button" variant="outline" size="sm"
+                            className="h-6 text-xs px-2"
+                            disabled={!alloc.goal_id || !alloc.value}
+                            onClick={() => setGoalAllocations((prev) => prev.map((a, j) => j === i ? { ...a, locked: true } : a))}
+                          >
+                            Done
+                          </Button>
+                          <Button
+                            type="button" variant="ghost" size="icon"
+                            className="h-6 w-6"
+                            onClick={() => setGoalAllocations((prev) => prev.filter((_, j) => j !== i))}
+                          >
+                            <MinusCircle className="h-3.5 w-3.5 text-destructive" />
+                          </Button>
+                        </div>
                       </div>
                     );
                   })}
