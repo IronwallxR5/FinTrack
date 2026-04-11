@@ -642,6 +642,11 @@ Goal deadline alerts reuse the existing `notifications` table and the `UNIQUE(bu
 
 **Solution:** Migrated all controllers to use `prisma.*` model methods. The Prisma schema was introspected from the existing PostgreSQL database using `prisma db pull`, ensuring the models matched the production schema exactly. A singleton `prisma.js` config handles client instantiation and graceful `$disconnect()` on `SIGTERM`/`SIGINT`.
 
+### 9. Cross-Currency Allocation Percentage Corruption on Edit
+**Problem:** When a transaction was created in a non-INR currency (e.g., `$100 USD`) with a goal allocation of 20%, the backend correctly stored `allocation_pct: 20` and `allocated_amount: 1660` (converted to the goal's INR currency). However, when the user opened the edit form, `handleEdit` pre-populated the locked pill using `allocated_amount: 1660` with `mode: "amount"`. On submit, the backend received `{ allocated_amount: 1660 }` against a `$100` transaction and calculated `1660 ÷ 100 × 100 = 1660%` — immediately rejected with "exceeds 100% of the transaction".
+
+**Solution:** Changed `handleEdit` to pre-populate locked pills using `allocation_pct` (the stored percentage) with `mode: "pct"` instead of `allocated_amount`. The percentage is always relative to the transaction amount and is currency-agnostic — it survives any currency combination without corruption. The pill label was also updated to display `"20% of transaction"` instead of a misleading currency amount that was denominated in the goal's currency, not the transaction's currency.
+
 ---
 
 ## 👤 Author

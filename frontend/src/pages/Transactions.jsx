@@ -116,13 +116,16 @@ export default function Transactions() {
       type: tx.type || "expense",
     });
 
-    // Pre-populate existing goal allocations as locked (read-only) pills
+    // Pre-populate existing goal allocations as locked (read-only) pills.
+    // IMPORTANT: use allocation_pct (currency-agnostic %) not allocated_amount,
+    // which is stored in the goal's currency and would produce a wrong % when
+    // sent back against the transaction's currency on re-submit.
     if (tx.type === "income" && Array.isArray(tx.goal_allocations) && tx.goal_allocations.length > 0) {
       setGoalAllocations(
         tx.goal_allocations.map((a) => ({
           goal_id: a.goal_id,
-          mode: "amount",
-          value: String(parseFloat(a.allocated_amount)),
+          mode: "pct",
+          value: String(parseFloat(a.allocation_pct)),
           locked: true,   // shows as a read-only pill until the user clicks Edit
         }))
       );
@@ -400,7 +403,9 @@ export default function Transactions() {
                               {goalObj ? goalObj.name : "Unknown goal"}
                             </span>
                             <span className="text-xs text-muted-foreground whitespace-nowrap">
-                              {goalObj ? goalObj.currency : ""} {parseFloat(alloc.value).toLocaleString()}
+                              {alloc.mode === "pct"
+                                ? `${parseFloat(alloc.value)}% of transaction`
+                                : `${goalObj ? goalObj.currency : ""} ${parseFloat(alloc.value).toLocaleString()}`}
                             </span>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
