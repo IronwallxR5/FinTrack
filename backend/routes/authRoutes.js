@@ -12,7 +12,6 @@ router.post("/login", login);
 router.get("/me", authMiddleware, getProfile);
 router.put("/me", authMiddleware, updateProfile);
 
-
 router.get("/google",
   passport.authenticate("google", { scope: ["profile", "email"] })
 );

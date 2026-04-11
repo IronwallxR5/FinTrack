@@ -175,10 +175,10 @@ const getTransactions = async (req, res, next) => {
 
     const where = { user_id: userId };
     if (category_id) where.category_id = category_id;
-    if (type && ["income", "expense"].includes(type)) where.type = type;
-    if (from) where.date = { ...where.date, gte: new Date(from) };
-    if (to) where.date = { ...where.date, lte: new Date(to) };
-    if (currency) where.currency = currency.toUpperCase();
+    if (type)        where.type = type;
+    if (from)        where.date = { ...where.date, gte: new Date(from) };
+    if (to)          where.date = { ...where.date, lte: new Date(to) };
+    if (currency)    where.currency = currency.toUpperCase();
 
     const transactions = await prisma.transactions.findMany({
       where,

@@ -1,6 +1,5 @@
 const { Prisma } = require("@prisma/client");
 const prisma = require("../config/prisma");
-const { isValidUUID } = require("../middlewares/validate");
 const { SUPPORTED_CURRENCIES } = require("../config/currencies");
 const { checkGoalDeadlineAndNotify } = require("../services/notificationService");
 

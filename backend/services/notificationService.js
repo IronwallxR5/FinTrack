@@ -140,7 +140,6 @@ async function checkBudgetAndNotify(userId, categoryId, _transactionCurrency) {
   }
 }
 
-module.exports = { checkBudgetAndNotify };
 
 /**
  * Called after getGoals — checks each active goal to see if its deadline

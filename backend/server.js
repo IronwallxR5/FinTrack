@@ -57,17 +57,10 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 3000;
-
-const startServer = async () => {
-  app.listen(PORT, () => {
-    console.log(`Server is running on PORT ${PORT}`);
-  });
-};
-
-startServer().catch((err) => {
-  console.error("Failed to start server:", err);
-  process.exit(1);
+app.listen(PORT, () => {
+  console.log(`Server is running on PORT ${PORT}`);
 });
+
 
 // Graceful shutdown
 const shutdown = async (signal) => {
