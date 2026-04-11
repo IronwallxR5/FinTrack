@@ -2,6 +2,7 @@ const { Prisma } = require("@prisma/client");
 const prisma = require("../config/prisma");
 const { isValidUUID } = require("../middlewares/validate");
 const { SUPPORTED_CURRENCIES } = require("../config/currencies");
+const { checkGoalDeadlineAndNotify } = require("../services/notificationService");
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -131,10 +132,17 @@ const getGoals = async (req, res, next) => {
       orderBy: { created_at: "asc" },
     });
 
+    const enriched = goals.map(enrichGoal);
+
+    // Fire-and-forget: check for goals within 7-day deadline window
+    checkGoalDeadlineAndNotify(userId, enriched).catch((err) =>
+      console.error("[GoalController] deadline notify error:", err.message)
+    );
+
     return res.status(200).json({
       success: true,
-      count:   goals.length,
-      data:    goals.map(enrichGoal),
+      count:   enriched.length,
+      data:    enriched,
     });
   } catch (err) {
     next(err);

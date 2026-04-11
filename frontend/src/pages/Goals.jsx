@@ -65,6 +65,13 @@ function StatusBadge({ status }) {
   );
 }
 
+const oneMonthFromNow = () => {
+  const d = new Date();
+  d.setMonth(d.getMonth() + 1);
+  return d.toISOString().split("T")[0];
+};
+
+// Minimum selectable date is still tomorrow (goals must be future-dated)
 const tomorrow = () => {
   const d = new Date();
   d.setDate(d.getDate() + 1);
@@ -80,7 +87,7 @@ export default function Goals() {
   const [showForm,  setShowForm]  = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({
-    name: "", target_amount: "", currency: defaultCurrency, target_date: tomorrow(),
+    name: "", target_amount: "", currency: defaultCurrency, target_date: oneMonthFromNow(),
   });
 
   const fetchGoals = async () => {
@@ -97,7 +104,7 @@ export default function Goals() {
   useEffect(() => { fetchGoals(); }, []);
 
   const resetForm = () => {
-    setForm({ name: "", target_amount: "", currency: defaultCurrency, target_date: tomorrow() });
+    setForm({ name: "", target_amount: "", currency: defaultCurrency, target_date: oneMonthFromNow() });
     setEditingId(null);
     setShowForm(false);
   };

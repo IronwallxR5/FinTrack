@@ -32,19 +32,20 @@ A full-stack personal finance management application with multi-currency support
 - **Receipt Uploads** — Attach JPEG, PNG, WEBP, GIF, or PDF receipts (≤ 5 MB) to any transaction
 
 ### Savings Goals (Sinking Funds)
-- **Goal Creation** — Set a target name, amount, currency, and deadline for any savings target (e.g. "New Laptop", "Trip to Goa")
+- **Goal Creation** — Set a target name, amount, currency, and deadline for any savings target (e.g. "New Laptop", "Trip to Goa"); defaults to 1 month from today
 - **Income Allocation** — When logging income, split any percentage or flat amount across multiple savings goals in a single transaction — each allocation is routed through the live FX service if goal and transaction currencies differ
 - **Dynamic Progress Tracking** — Goal balances are computed on-the-fly from the `transaction_goal_allocations` join table — no stale `current_amount` column that can drift
 - **Radial Progress Rings** — SVG-animated rings show completion percentage per goal with colour-coded status (active / overdue / completed)
 - **Monthly Savings Rate** — Each active goal displays the required monthly contribution to hit the deadline
+- **Goal Deadline Alerts** — When a goal has 7 or fewer days remaining, an in-app notification and SendGrid email are automatically triggered (deduplicated to once per goal per month — same pattern as budget alerts)
 - **Data Integrity on Edit/Delete** — Editing a transaction's amount or currency automatically re-computes all its allocations atomically; deleting a transaction cascades and removes its allocations via database-level `ON DELETE CASCADE`
 - **Dashboard Widget** — Top 3 active goals shown on the main dashboard with progress bars and a "View all →" link
 
 ### Budget Monitoring & Alerts
 - **Monthly Budgets** — Set spending limits per expense category with real-time progress tracking
 - **Cross-Currency Budget Aggregation** — A budget set in INR also tracks USD/EUR/GBP expenses in the same category, auto-converted via live exchange rates
-- **Smart Notifications** — Automatic alerts at 80% (warning) and 100% (exceeded) thresholds
-- **Email Alerts** — SendGrid-powered email notifications when budget thresholds are crossed
+- **Smart Notifications** — Automatic alerts at 80% (warning) and 100% (exceeded) budget thresholds; and a 7-day deadline warning for savings goals
+- **Email Alerts** — SendGrid-powered email notifications for both budget breaches and goal deadline warnings
 - **In-App Notification Centre** — Bell icon with unread badge, mark-as-read, and bulk clear actions
 
 ### AI-Powered Intelligence
@@ -159,8 +160,9 @@ A full-stack personal finance management application with multi-currency support
 2. Express middleware verifies JWT → extracts `req.user.id`
 3. Controller executes queries against PostgreSQL via the **Prisma client**
 4. For income transactions with goal allocations: `goalAllocationService` validates, FX-converts, and atomically writes allocations inside a `prisma.$transaction` block
-5. For expense transactions: `notificationService` asynchronously checks budget thresholds, converts cross-currency spending via the `exchangeRates` service, and triggers SendGrid email + in-app notification if 80%/100% is breached
-6. AI endpoints inject the user's real financial context into the Groq system prompt for personalised responses
+5. After `getGoals` responds: `checkGoalDeadlineAndNotify` runs fire-and-forget to check if any active goal has ≤ 7 days remaining and raises an in-app + email alert (deduplicated per goal per month)
+6. For expense transactions: `notificationService` asynchronously checks budget thresholds, converts cross-currency spending via the `exchangeRates` service, and triggers SendGrid email + in-app notification if 80%/100% is breached
+7. AI endpoints inject the user's real financial context into the Groq system prompt for personalised responses
 
 ---
 
@@ -211,7 +213,7 @@ FinTrack/
 │   ├── services/
 │   │   ├── exchangeRates.js           # Shared exchange rate cache (1-hour TTL)
 │   │   ├── goalAllocationService.js   # Dual-mode allocation resolver + FX conversion
-│   │   └── notificationService.js     # Budget breach detection + email dispatch
+│   │   └── notificationService.js     # Budget breach detection + goal deadline alerts + email dispatch
 │   │
 │   ├── uploads/                   # Receipt files on disk (git-ignored)
 │   ├── server.js                  # App entry point
@@ -586,8 +588,8 @@ Budget breach detection runs asynchronously after transaction creation. A failed
 ### 9. AI Graceful Degradation
 The Groq client initialises as `null` when `GROQ_API_KEY` is absent. Every AI endpoint checks for `null` first and returns `503` with a human-readable message. The rest of the app works fully without an AI key.
 
-### 10. Resilient Parallel Data Fetching
-On pages that fetch multiple resources (Dashboard, Transactions), the goals endpoint is fetched **independently** — not inside the main `Promise.all`. If the goals API fails, the core financial data (transactions, budgets, summary) still loads successfully.
+### 11. Goal Deadline Notifications (Unified Alert System)
+Goal deadline alerts reuse the existing `notifications` table and the `UNIQUE(budget_id, type, month, year)` deduplication constraint by storing `goal_id` in the `budget_id` column (a nullable FK) and using `type = 'goal_deadline_warning'`. No schema migration was required — the constraint already handles both cases. The check runs fire-and-forget from `getGoals` after the response is already sent, so it never adds latency to page load.
 
 ---
 
