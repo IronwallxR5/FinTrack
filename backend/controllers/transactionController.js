@@ -186,6 +186,10 @@ const getTransactions = async (req, res, next) => {
         categories: {
           select: { name: true, type: true },
         },
+        // Include allocations only — goal name is not needed in the list
+        goal_allocations: {
+          select: { goal_id: true, allocation_pct: true, allocated_amount: true },
+        },
       },
       orderBy: [{ date: "desc" }, { created_at: "desc" }],
       skip: offset,
@@ -198,6 +202,7 @@ const getTransactions = async (req, res, next) => {
       category_name: t.categories?.name ?? null,
       category_type: t.categories?.type ?? null,
       categories: undefined,
+      // Keep goal_allocations as-is (empty array for expenses)
     }));
 
     return res.status(200).json({
@@ -222,6 +227,9 @@ const getTransactionById = async (req, res, next) => {
       include: {
         categories: {
           select: { name: true, type: true },
+        },
+        goal_allocations: {
+          select: { goal_id: true, allocation_pct: true, allocated_amount: true },
         },
       },
     });

@@ -115,6 +115,20 @@ export default function Transactions() {
       currency: tx.currency || defaultCurrency,
       type: tx.type || "expense",
     });
+
+    // Pre-populate existing goal allocations so the user sees what was already set
+    if (tx.type === "income" && Array.isArray(tx.goal_allocations) && tx.goal_allocations.length > 0) {
+      setGoalAllocations(
+        tx.goal_allocations.map((a) => ({
+          goal_id: a.goal_id,
+          mode: "amount",                            // show stored flat amounts — clearer than a recalculated %
+          value: String(parseFloat(a.allocated_amount)),
+        }))
+      );
+    } else {
+      setGoalAllocations([]);
+    }
+
     setEditingId(tx.id);
     setShowForm(true);
   };
